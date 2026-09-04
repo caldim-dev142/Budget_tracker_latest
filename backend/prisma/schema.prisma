@@ -1,0 +1,326 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Full schema mirrors Flutter Drift tables (doc 05).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Households ──────────────────────────────────────────────────────────────
+model Household {
+  id          String   @id @default(uuid())
+  name        String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members       HouseholdMember[]
+  categories    Category[]
+  accounts      Account[]
+  entries       Entry[]
+  budgets       Budget[]
+  sinkingFunds  SinkingFund[]
+  savingGoals   SavingGoal[]
+  creditCards   CreditCard[]
+  monthSnapshots MonthSnapshot[]
+  receivables   Receivable[]
+  plannedBills  PlannedBill[]
+  reserveLines  ReserveLine[]
+
+  @@map("households")
+}
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  firebaseUid  String?  @unique @map("firebase_uid")
+  passwordHash String   @map("password_hash") // argon2id (doc 12 §3)
+  displayName  String   @map("display_name")
+  role         String   @default("member") // 'owner' | 'member'
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  memberships   HouseholdMember[]
+  refreshTokens RefreshToken[]
+  entries       Entry[]           @relation("EntryCreatedBy")
+
+  @@map("users")
+}
+
+model HouseholdMember {
+  householdId String @map("household_id")
+  userId      String @map("user_id")
+  role        String @default("member")
+  joinedAt    DateTime @default(now()) @map("joined_at")
+
+  household Household @relation(fields: [householdId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@id([householdId, userId])
+  @@map("household_members")
+}
+
+// Refresh token rotation (doc 12 §4)
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash") // SHA-256 of the token
+  family    String   // detect reuse: invalidate whole family on reuse
+  usedAt    DateTime? @map("used_at")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ─── Categories ──────────────────────────────────────────────────────────────
+model Category {
+  id          String   @id
+  householdId String   @map("household_id")
+  kind        String   // EntryKind enum value
+  groupCode   String?  @map("group_code")
+  name        String
+  needOrWant  String?  @map("need_or_want")
+  isDeduction Boolean  @default(false) @map("is_deduction")
+  isSystem    Boolean  @default(false) @map("is_system")
+  sortOrder   Int      @default(0) @map("sort_order")
+  archivedAt  DateTime? @map("archived_at")
+
+  household Household @relation(fields: [householdId], references: [id])
+  entries   Entry[]
+  budgets   Budget[]
+
+  @@index([householdId, kind])
+  @@map("categories")
+}
+
+// ─── Accounts ────────────────────────────────────────────────────────────────
+model Account {
+  id                  String   @id @default(uuid())
+  householdId         String   @map("household_id")
+  name                String
+  type                String   // 'bank' | 'cash'
+  currentBalancePaise BigInt   @default(0) @map("current_balance_paise") // doc 05: BIGINT
+  isActive            Boolean  @default(true) @map("is_active")
+  sortOrder           Int      @default(0) @map("sort_order")
+
+  household Household @relation(fields: [householdId], references: [id])
+  entries   Entry[]
+
+  @@index([householdId])
+  @@map("accounts")
+}
+
+// ─── Entries (core transaction table) ───────────────────────────────────────
+model Entry {
+  id          String   @id // client UUID for idempotent sync
+  householdId String   @map("household_id")
+  categoryId  String   @map("category_id")
+  kind        String
+  accountId   String?  @map("account_id")
+  cardId      String?  @map("card_id")
+  entryDate   DateTime @map("entry_date")
+  amountPaise BigInt   @map("amount_paise") // doc 05: BIGINT
+  note        String?
+  parentId    String?  @map("parent_id")
+  createdBy   String   @map("created_by")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  household Household  @relation(fields: [householdId], references: [id])
+  category  Category   @relation(fields: [categoryId], references: [id])
+  account   Account?   @relation(fields: [accountId], references: [id])
+  creator   User       @relation("EntryCreatedBy", fields: [createdBy], references: [id])
+  card      CreditCard? @relation(fields: [cardId], references: [id])
+
+  @@index([householdId, entryDate])
+  @@index([categoryId])
+  @@index([cardId])
+  @@map("entries")
+}
+
+// ─── Budgets ─────────────────────────────────────────────────────────────────
+model Budget {
+  id          String @id @default(uuid())
+  householdId String @map("household_id")
+  categoryId  String @map("category_id")
+  yearMonth   String @map("year_month") // 'YYYY-MM'
+  amountPaise BigInt @default(0) @map("amount_paise")
+
+  household Household @relation(fields: [householdId], references: [id])
+  category  Category  @relation(fields: [categoryId], references: [id])
+
+  @@unique([categoryId, yearMonth])
+  @@index([householdId, yearMonth])
+  @@map("budgets")
+}
+
+// ─── Sinking Funds ────────────────────────────────────────────────────────────
+model SinkingFund {
+  id                  String   @id @default(uuid())
+  householdId         String   @map("household_id")
+  name                String
+  openingReservePaise BigInt   @default(0) @map("opening_reserve_paise")
+  archivedAt          DateTime? @map("archived_at")
+
+  household Household      @relation(fields: [householdId], references: [id])
+  movements FundMovement[]
+
+  @@index([householdId])
+  @@map("sinking_funds")
+}
+
+model FundMovement {
+  id          String   @id @default(uuid())
+  fundId      String   @map("fund_id")
+  type        String   // 'contribution' | 'withdrawal'
+  amountPaise BigInt   @map("amount_paise")
+  movementDate DateTime @map("movement_date")
+  note        String?
+
+  fund SinkingFund @relation(fields: [fundId], references: [id])
+
+  @@index([fundId])
+  @@map("fund_movements")
+}
+
+// ─── Saving Goals ─────────────────────────────────────────────────────────────
+model SavingGoal {
+  id                 String   @id @default(uuid())
+  householdId        String   @map("household_id")
+  bucket             String   // 'retirement' | 'children' | 'other_goals'
+  name               String
+  targetPaise        BigInt?  @map("target_paise")
+  monthlyBudgetPaise BigInt   @default(0) @map("monthly_budget_paise")
+  archivedAt         DateTime? @map("archived_at")
+
+  household     Household          @relation(fields: [householdId], references: [id])
+  contributions GoalContribution[]
+
+  @@index([householdId])
+  @@map("saving_goals")
+}
+
+model GoalContribution {
+  id               String   @id @default(uuid())
+  goalId           String   @map("goal_id")
+  amountPaise      BigInt   @map("amount_paise")
+  contributionDate DateTime @map("contribution_date")
+  note             String?
+
+  goal SavingGoal @relation(fields: [goalId], references: [id])
+
+  @@index([goalId])
+  @@map("goal_contributions")
+}
+
+// ─── Credit Cards ─────────────────────────────────────────────────────────────
+model CreditCard {
+  id                     String   @id @default(uuid())
+  householdId            String   @map("household_id")
+  name                   String
+  previousOutstandingPaise BigInt @default(0) @map("previous_outstanding_paise")
+  isActive               Boolean  @default(true) @map("is_active")
+
+  household    Household         @relation(fields: [householdId], references: [id])
+  transactions CardTransaction[]
+  entries      Entry[]
+
+  @@index([householdId])
+  @@map("credit_cards")
+}
+
+model CardTransaction {
+  id          String   @id @default(uuid())
+  cardId      String   @map("card_id")
+  txnDate     DateTime @map("txn_date")
+  description String
+  amountPaise BigInt   @map("amount_paise") // payment < 0, spend > 0
+  sNo         Int?     @map("s_no")
+
+  card CreditCard @relation(fields: [cardId], references: [id])
+
+  @@index([cardId])
+  @@map("card_transactions")
+}
+
+// ─── Receivables ──────────────────────────────────────────────────────────────
+model Receivable {
+  id          String   @id @default(uuid())
+  householdId String   @map("household_id")
+  personName  String   @map("person_name")
+  amountPaise BigInt   @map("amount_paise")
+  status      String   @default("open") // 'open' | 'returned'
+  dueDate     DateTime? @map("due_date")
+
+  household Household @relation(fields: [householdId], references: [id])
+
+  @@index([householdId])
+  @@map("receivables")
+}
+
+// ─── Planned Bills ────────────────────────────────────────────────────────────
+model PlannedBill {
+  id          String   @id @default(uuid())
+  householdId String   @map("household_id")
+  name        String
+  amountPaise BigInt   @map("amount_paise")
+  dueDate     DateTime? @map("due_date")
+  isPaid      Boolean  @default(false) @map("is_paid")
+
+  household Household @relation(fields: [householdId], references: [id])
+
+  @@index([householdId])
+  @@map("planned_bills")
+}
+
+// ─── Reserve Lines ────────────────────────────────────────────────────────────
+model ReserveLine {
+  id          String @id @default(uuid())
+  householdId String @map("household_id")
+  yearMonth   String @map("year_month")
+  name        String
+  amountPaise BigInt @map("amount_paise")
+  source      String @default("manual") // 'manual' | 'derived'
+
+  household Household @relation(fields: [householdId], references: [id])
+
+  @@index([householdId, yearMonth])
+  @@map("reserve_lines")
+}
+
+// ─── Month Snapshots ──────────────────────────────────────────────────────────
+model MonthSnapshot {
+  id                      String   @id @default(uuid())
+  householdId             String   @map("household_id")
+  yearMonth               String   @map("year_month")
+  openingBalancePaise     BigInt   @default(0) @map("opening_balance_paise")
+  lastMonthReservesPaise  BigInt   @default(0) @map("last_month_reserves_paise")
+  incomePaise             BigInt   @default(0) @map("income_paise")
+  adjustmentsPaise        BigInt   @default(0) @map("adjustments_paise")
+  spendingPaise           BigInt   @default(0) @map("spending_paise")
+  protectionPaise         BigInt   @default(0) @map("protection_paise")
+  savingPaise             BigInt   @default(0) @map("saving_paise")
+  reservesPaise           BigInt   @default(0) @map("reserves_paise")
+  closingBalancePaise     BigInt   @default(0) @map("closing_balance_paise")
+  remainingPaise          BigInt   @default(0) @map("remaining_paise")
+  status                  String   @default("open") // 'open' | 'closed'
+  closedAt                DateTime? @map("closed_at")
+
+  household Household @relation(fields: [householdId], references: [id])
+
+  @@unique([householdId, yearMonth])
+  @@index([householdId])
+  @@map("month_snapshots")
+}

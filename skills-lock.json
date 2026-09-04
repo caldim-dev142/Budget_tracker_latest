@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "backend-security-coder": {
+      "source": "rmyndharis/antigravity-skills",
+      "sourceType": "github",
+      "skillPath": "skills/backend-security-coder/SKILL.md",
+      "computedHash": "f9c4364e1c99867774b991f75908928973b497218e35270d7f9f8c2f48525635"
+    }
+  }
+}

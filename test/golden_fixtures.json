@@ -1,0 +1,186 @@
+{
+  "_comment": "Golden fixtures extracted from sample workbook (doc 15 §1). Both Dart and TypeScript engines must produce identical paise-exact results on these inputs.",
+  "_version": "1.0",
+
+  "scenarios": [
+    {
+      "id": "base_case",
+      "description": "Standard month: income, adjustments, spending, protection, saving, reserves",
+      "input": {
+        "openingBalance": 0,
+        "lastMonthReserves": 0,
+        "income": 9000000,
+        "incomeDeductions": 0,
+        "adjustments": 1213600,
+        "spending": 4559200,
+        "protection": 2048000,
+        "saving": 2500000,
+        "reservesSetAside": 7416000
+      },
+      "expected": {
+        "netIncome": 9000000,
+        "remaining": -6309600,
+        "comment": "Opening(0)+Reserves(0)+Income(9000000)+Adj(1213600)-Spend(4559200)-Prot(2048000)-Save(2500000)-Reserves(7416000) = -6309600"
+      }
+    },
+    {
+      "id": "with_opening_balance",
+      "description": "Month with prior closing balance carried over",
+      "input": {
+        "openingBalance": 5000000,
+        "lastMonthReserves": 2000000,
+        "income": 8000000,
+        "incomeDeductions": 100000,
+        "adjustments": -500000,
+        "spending": 3000000,
+        "protection": 1500000,
+        "saving": 1000000,
+        "reservesSetAside": 4000000
+      },
+      "expected": {
+        "netIncome": 7900000,
+        "remaining": 4900000,
+        "comment": "Opening(5M)+LastRes(2M)+Income(8M)-Ded(0.1M)+Adj(-0.5M)-Spend(3M)-Prot(1.5M)-Save(1M)-Reserves(4M) = 4.9M"
+      }
+    },
+    {
+      "id": "edge_negative_remaining",
+      "description": "Month where spending exceeds income (doc 02 §5 edge case)",
+      "input": {
+        "openingBalance": 1000000,
+        "lastMonthReserves": 500000,
+        "income": 2000000,
+        "incomeDeductions": 0,
+        "adjustments": 0,
+        "spending": 5000000,
+        "protection": 500000,
+        "saving": 500000,
+        "reservesSetAside": 1000000
+      },
+      "expected": {
+        "netIncome": 2000000,
+        "remaining": -3500000,
+        "comment": "Opening(1M)+LastRes(0.5M)+Income(2M)-Spend(5M)-Prot(0.5M)-Save(0.5M)-Res(1M) = -3.5M (allowed, flagged in UI)"
+      }
+    },
+    {
+      "id": "edge_zero_income",
+      "description": "Month with no income (e.g. sabbatical) - doc 02 §5 edge 2",
+      "input": {
+        "openingBalance": 10000000,
+        "lastMonthReserves": 3000000,
+        "income": 0,
+        "incomeDeductions": 0,
+        "adjustments": 500000,
+        "spending": 2000000,
+        "protection": 500000,
+        "saving": 500000,
+        "reservesSetAside": 3000000
+      },
+      "expected": {
+        "netIncome": 0,
+        "remaining": 7500000,
+        "comment": "Opening(10M)+LastRes(3M)+Income(0)+Adj(0.5M)-Spend(2M)-Prot(0.5M)-Save(0.5M)-Res(3M) = 7.5M"
+      }
+    },
+    {
+      "id": "edge_negative_adjustment",
+      "description": "Month with net negative adjustments (more lending than borrowing) - doc 02 §5 edge 3",
+      "input": {
+        "openingBalance": 5000000,
+        "lastMonthReserves": 1000000,
+        "income": 8000000,
+        "incomeDeductions": 0,
+        "adjustments": -2000000,
+        "spending": 3000000,
+        "protection": 1000000,
+        "saving": 1000000,
+        "reservesSetAside": 2000000
+      },
+      "expected": {
+        "netIncome": 8000000,
+        "remaining": 5000000,
+        "comment": "Opening(5M)+LastRes(1M)+Income(8M)+Adj(-2M)-Spend(3M)-Prot(1M)-Save(1M)-Res(2M) = 5M"
+      }
+    },
+    {
+      "id": "edge_negative_reserve",
+      "description": "Fund withdrawal exceeds reserve (doc 02 §5 edge 5) - allowed but flagged",
+      "input": {
+        "fundOpeningReserve": 50000,
+        "fundContributions": 100000,
+        "fundWithdrawals": 300000
+      },
+      "expected": {
+        "closingReserve": -150000,
+        "isNegativeReserve": true,
+        "comment": "50000 + 100000 - 300000 = -150000 paise (negative reserve is allowed)"
+      }
+    },
+    {
+      "id": "rollup_group_total",
+      "description": "Group total should equal sum of all item amounts in the group",
+      "input": {
+        "itemAmounts": [150000, 300000, 50000, 200000]
+      },
+      "expected": {
+        "groupTotal": 700000,
+        "comment": "150000 + 300000 + 50000 + 200000 = 700000 paise"
+      }
+    },
+    {
+      "id": "budget_pct_over",
+      "description": "Budget percentage calculation when overspent",
+      "input": {
+        "budget": 500000,
+        "actual": 650000
+      },
+      "expected": {
+        "difference": 150000,
+        "pctUsed": 1.3,
+        "isOverBudget": true
+      }
+    },
+    {
+      "id": "budget_pct_under",
+      "description": "Budget percentage calculation when underspent",
+      "input": {
+        "budget": 500000,
+        "actual": 350000
+      },
+      "expected": {
+        "difference": -150000,
+        "pctUsed": 0.7,
+        "isOverBudget": false,
+        "isNearBudget": false
+      }
+    },
+    {
+      "id": "budget_pct_near",
+      "description": "Budget bar shows near-budget state at 80-100%",
+      "input": {
+        "budget": 500000,
+        "actual": 430000
+      },
+      "expected": {
+        "pctUsed": 0.86,
+        "isOverBudget": false,
+        "isNearBudget": true
+      }
+    },
+    {
+      "id": "rollover_next_month",
+      "description": "Next month opening derived from prior closing balance + reserves",
+      "input": {
+        "totalAvailable": 7648300,
+        "reservesAtClose": 6000000
+      },
+      "expected": {
+        "closingBalance": 1648300,
+        "nextMonthOpening": 1648300,
+        "nextMonthLastReserves": 6000000,
+        "comment": "closingBalance = totalAvailable - reserves = 7648300 - 6000000 = 1648300"
+      }
+    }
+  ]
+}
