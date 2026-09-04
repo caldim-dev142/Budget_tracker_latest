@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
@@ -131,7 +132,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
   }
 
-  final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+  final _googleSignIn = GoogleSignIn(
+    serverClientId: '812371931220-nfm4elvsk9sbsu1e2bh3mu8une6gb96o.apps.googleusercontent.com',
+    scopes: ['email', 'profile'],
+  );
 
   /// Authenticate with Google ID token via NestJS backend, with local offline fallback
   Future<void> authenticateWithGoogleIdToken({
@@ -308,15 +312,17 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       }
       state = AsyncValue.error(message, StackTrace.current);
       return false;
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('Google Sign-In Exception: $e\n$st');
       final errStr = e.toString();
-      if (errStr.contains('network') || errStr.contains('SocketException')) {
+      if (errStr.contains('SocketException')) {
         state = AsyncValue.error('Network error during Google sign-in. Please check your connection.', StackTrace.current);
       } else {
-        state = AsyncValue.error('Google sign-in failed. Please try again.', StackTrace.current);
+        state = AsyncValue.error('Google sign-in failed: $errStr', StackTrace.current);
       }
       return false;
     }
+
   }
 
   Future<void> _ensureUsersTable(AppDatabase db) async {
