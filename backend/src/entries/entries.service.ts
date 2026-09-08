@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { CreateEntryDto } from './dto/create-entry.dto';
 import { UpdateEntryDto } from './dto/update-entry.dto';
+import { seedCategories } from '../categories/categories-seed.data';
 
 @Injectable()
 export class EntriesService {
@@ -33,12 +34,52 @@ export class EntriesService {
    * Last-write-wins on version number.
    */
   async upsertBatch(householdId: string, entries: CreateEntryDto[], userId: string) {
+    // Ensure default categories exist for this household if missing
+    const catCount = await this.prisma.category.count({ where: { householdId } });
+    if (catCount === 0) {
+      try {
+        const data = seedCategories.map((c) => ({
+          id: `${householdId}-${c.id}`,
+          householdId,
+          kind: c.kind,
+          groupCode: c.groupCode ?? null,
+          name: c.name,
+          needOrWant: c.needOrWant ?? null,
+          isDeduction: c.isDeduction,
+          isSystem: c.isSystem,
+          sortOrder: c.sortOrder,
+        }));
+        await this.prisma.category.createMany({
+          data,
+          skipDuplicates: true,
+        });
+      } catch (e) {
+        console.error('Failed to auto-seed categories in upsertBatch:', e);
+      }
+    }
+
     const results = await Promise.allSettled(
-      entries.map((dto) => {
+      entries.map(async (dto) => {
         // Map categoryId to database format (householdId-categoryId) if needed
         let categoryId = dto.categoryId;
         if (categoryId && !categoryId.startsWith(householdId) && !categoryId.startsWith('custom-')) {
           categoryId = `${householdId}-${categoryId}`;
+        }
+
+        // Ensure category exists before inserting entry to avoid FK violation
+        if (categoryId) {
+          const catExists = await this.prisma.category.findUnique({ where: { id: categoryId } });
+          if (!catExists) {
+            await this.prisma.category.create({
+              data: {
+                id: categoryId,
+                householdId,
+                kind: dto.kind ?? 'spending',
+                name: dto.categoryId ?? 'Uncategorized',
+                sortOrder: 999,
+              },
+            }).catch(() => {});
+          }
         }
 
         return this.prisma.entry.upsert({
@@ -51,7 +92,7 @@ export class EntriesService {
             accountId: dto.accountId ?? null,
             cardId: dto.cardId ?? null,
             entryDate: new Date(dto.entryDate),
-            amountPaise: BigInt(dto.amountPaise),
+            amountPaise: Math.round(Number(dto.amountPaise)),
             note: dto.note ?? null,
             parentId: dto.parentId ?? null,
             createdBy: userId,
@@ -62,7 +103,7 @@ export class EntriesService {
           },
           update: {
             // Last-write-wins: only update if incoming version > stored version (doc 11)
-            amountPaise: BigInt(dto.amountPaise),
+            amountPaise: Math.round(Number(dto.amountPaise)),
             note: dto.note ?? null,
             updatedAt: new Date(dto.updatedAt ?? Date.now()),
             deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
@@ -71,6 +112,12 @@ export class EntriesService {
         });
       }),
     );
+
+    results.forEach((r, idx) => {
+      if (r.status === 'rejected') {
+        console.error(`Failed to upsert entry ${entries[idx]?.id}:`, (r as PromiseRejectedResult).reason);
+      }
+    });
 
     return {
       synced: results.filter((r) => r.status === 'fulfilled').length,

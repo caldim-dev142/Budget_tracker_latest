@@ -47,8 +47,8 @@ export class SavingService {
         householdId,
         bucket,
         name,
-        monthlyBudgetPaise: BigInt(monthlyBudgetPaise),
-        targetPaise: targetPaise ? BigInt(targetPaise) : null,
+        monthlyBudgetPaise: Math.round(Number(monthlyBudgetPaise)),
+        targetPaise: targetPaise ? Math.round(Number(targetPaise)) : null,
       },
     });
   }
@@ -66,7 +66,7 @@ export class SavingService {
     return this.prisma.goalContribution.create({
       data: {
         goalId,
-        amountPaise: BigInt(amountPaise),
+        amountPaise: Math.round(Number(amountPaise)),
         contributionDate: new Date(),
         note,
       },

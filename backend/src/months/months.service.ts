@@ -86,12 +86,12 @@ export class MonthsService {
       },
     });
 
-    let income = 0n;
-    let incomeDeduction = 0n;
-    let adjustments = 0n;
-    let spending = 0n;
-    let protection = 0n;
-    let saving = 0n;
+    let income = 0;
+    let incomeDeduction = 0;
+    let adjustments = 0;
+    let spending = 0;
+    let protection = 0;
+    let saving = 0;
 
     for (const e of entries) {
       const amt = e.amountPaise;
@@ -133,13 +133,13 @@ export class MonthsService {
       ? activeSnap.openingBalancePaise
       : priorSnap
       ? priorSnap.closingBalancePaise
-      : 0n;
+      : 0;
 
     const lastMonthReserves = activeSnap
       ? activeSnap.lastMonthReservesPaise
       : priorSnap
       ? priorSnap.reservesPaise
-      : 0n;
+      : 0;
 
     // 3. Fetch sinking fund reserve total
     const funds = await this.prisma.sinkingFund.findMany({
@@ -147,15 +147,15 @@ export class MonthsService {
       include: { movements: true },
     });
 
-    let totalReserves = 0n;
+    let totalReserves = 0;
     for (const f of funds) {
       const fundOpening = f.openingReservePaise;
       const contributions = f.movements
         .filter((m) => m.type === 'contribution')
-        .reduce((sum, m) => sum + m.amountPaise, 0n);
+        .reduce((sum, m) => sum + m.amountPaise, 0);
       const withdrawals = f.movements
         .filter((m) => m.type === 'withdrawal')
-        .reduce((sum, m) => sum + m.amountPaise, 0n);
+        .reduce((sum, m) => sum + m.amountPaise, 0);
       totalReserves += this.engine.closingReserve(fundOpening, contributions, withdrawals);
     }
 
@@ -163,7 +163,7 @@ export class MonthsService {
     const accounts = await this.prisma.account.findMany({
       where: { householdId, isActive: true },
     });
-    const totalAvailable = accounts.reduce((sum, a) => sum + a.currentBalancePaise, 0n);
+    const totalAvailable = accounts.reduce((sum, a) => sum + a.currentBalancePaise, 0);
 
     const closingBalance = this.engine.closingBalance(totalAvailable, totalReserves);
 
@@ -229,8 +229,8 @@ export class MonthsService {
 
     return {
       ...snapshot,
-      openingBalancePaise: Number(snapshot.openingBalancePaise),
-      closingBalancePaise: Number(snapshot.closingBalancePaise),
+      openingBalancePaise: snapshot.openingBalancePaise,
+      closingBalancePaise: snapshot.closingBalancePaise,
     };
   }
 

@@ -19,23 +19,23 @@ export class EngineService {
     return computeWaterfall(actuals);
   }
 
-  computeNetIncome(inflows: bigint, deductions: bigint) {
+  computeNetIncome(inflows: number, deductions: number) {
     return computeNetIncome(inflows, deductions);
   }
 
-  computeBudgetLine(budget: bigint, actual: bigint) {
+  computeBudgetLine(budget: number, actual: number) {
     return computeBudgetLine(budget, actual);
   }
 
-  closingReserve(opening: bigint, contributions: bigint, withdrawals: bigint) {
+  closingReserve(opening: number, contributions: number, withdrawals: number) {
     return closingReserve(opening, contributions, withdrawals);
   }
 
-  closingBalance(totalAvailable: bigint, reserves: bigint) {
+  closingBalance(totalAvailable: number, reserves: number) {
     return closingBalance(totalAvailable, reserves);
   }
 
-  groupTotal(amounts: bigint[]) {
+  groupTotal(amounts: number[]) {
     return groupTotal(amounts);
   }
 }

@@ -30,10 +30,10 @@ export class BudgetsService {
           householdId,
           categoryId: item.categoryId,
           yearMonth,
-          amountPaise: BigInt(item.amountPaise),
+          amountPaise: Math.round(Number(item.amountPaise)),
         },
         update: {
-          amountPaise: BigInt(item.amountPaise),
+          amountPaise: Math.round(Number(item.amountPaise)),
         },
       }),
     );

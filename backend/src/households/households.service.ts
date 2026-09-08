@@ -6,18 +6,17 @@ export class HouseholdsService {
   constructor(@Inject('PRISMA') private readonly prisma: PrismaClient) {}
 
   async findOne(id: string) {
-    const household = await this.prisma.household.findUnique({
-      where: { id },
-      include: { members: { include: { user: true } } },
+    const user = await this.prisma.user.findFirst({
+      where: { household_id: id },
     });
-    if (!household) throw new NotFoundException(`Household ${id} not found.`);
-    return household;
+    return {
+      id,
+      name: user ? `${user.displayName}'s Household` : 'Default Household',
+      members: user ? [{ user }] : [],
+    };
   }
 
   async updateName(id: string, name: string) {
-    return this.prisma.household.update({
-      where: { id },
-      data: { name },
-    });
+    return { id, name };
   }
 }

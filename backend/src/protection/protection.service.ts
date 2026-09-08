@@ -40,7 +40,7 @@ export class ProtectionService {
       data: {
         householdId,
         name,
-        openingReservePaise: BigInt(openingReservePaise),
+        openingReservePaise: Math.round(Number(openingReservePaise)),
       },
     });
   }
@@ -60,7 +60,7 @@ export class ProtectionService {
       data: {
         fundId,
         type,
-        amountPaise: BigInt(amountPaise),
+        amountPaise: Math.round(Number(amountPaise)),
         movementDate: new Date(),
         note,
       },

@@ -7,25 +7,25 @@
  */
 
 export interface MonthActuals {
-  openingBalance: bigint;
-  lastMonthReserves: bigint;
-  income: bigint;
-  adjustments: bigint; // signed
-  spending: bigint;
-  protection: bigint;
-  saving: bigint;
-  reservesSetAside: bigint;
+  openingBalance: number;
+  lastMonthReserves: number;
+  income: number;
+  adjustments: number; // signed
+  spending: number;
+  protection: number;
+  saving: number;
+  reservesSetAside: number;
 }
 
 export interface WaterfallResult {
-  opening: bigint;
-  income: bigint;
-  adjustments: bigint;
-  spending: bigint;
-  protection: bigint;
-  saving: bigint;
-  reserves: bigint;
-  remaining: bigint;
+  opening: number;
+  income: number;
+  adjustments: number;
+  spending: number;
+  protection: number;
+  saving: number;
+  reserves: number;
+  remaining: number;
 }
 
 /**
@@ -64,9 +64,9 @@ export function computeWaterfall(m: MonthActuals): WaterfallResult {
  * Net income = inflows − deductions (doc 01 §2.1).
  */
 export function computeNetIncome(
-  inflows: bigint,
-  deductions: bigint,
-): bigint {
+  inflows: number,
+  deductions: number,
+): number {
   return inflows - deductions;
 }
 
@@ -76,16 +76,16 @@ export function computeNetIncome(
  * pctUsed = actual / budget (as number for UI, never stored)
  */
 export function computeBudgetLine(
-  budget: bigint,
-  actual: bigint,
+  budget: number,
+  actual: number,
 ): {
-  difference: bigint;
+  difference: number;
   pctUsed: number;
   isOverBudget: boolean;
   isNearBudget: boolean;
 } {
   const difference = actual - budget;
-  const pctUsed = budget === 0n ? 0 : Number(actual) / Number(budget);
+  const pctUsed = budget === 0 ? 0 : actual / budget;
   return {
     difference,
     pctUsed,
@@ -100,10 +100,10 @@ export function computeBudgetLine(
  * CAN be negative (doc 02 §5 edge 5).
  */
 export function closingReserve(
-  openingReserve: bigint,
-  contributions: bigint,
-  withdrawals: bigint,
-): bigint {
+  openingReserve: number,
+  contributions: number,
+  withdrawals: number,
+): number {
   return openingReserve + contributions - withdrawals;
 }
 
@@ -112,15 +112,15 @@ export function closingReserve(
  * closingBalance = totalAvailable − reserves
  */
 export function closingBalance(
-  totalAvailable: bigint,
-  reserves: bigint,
-): bigint {
+  totalAvailable: number,
+  reserves: number,
+): number {
   return totalAvailable - reserves;
 }
 
 /**
  * Group rollup: sum of all item amounts.
  */
-export function groupTotal(amounts: bigint[]): bigint {
-  return amounts.reduce((s, a) => s + a, 0n);
+export function groupTotal(amounts: number[]): number {
+  return amounts.reduce((s, a) => s + a, 0);
 }

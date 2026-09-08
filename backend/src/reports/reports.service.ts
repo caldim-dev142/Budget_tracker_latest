@@ -37,21 +37,21 @@ export class ReportsService {
       ? activeSnap.openingBalancePaise
       : priorSnap
       ? priorSnap.closingBalancePaise
-      : 0n;
+      : 0;
 
     const lastMonthReserves = activeSnap
       ? activeSnap.lastMonthReservesPaise
       : priorSnap
       ? priorSnap.reservesPaise
-      : 0n;
+      : 0;
 
     // 3. Compute layer totals (mirrors RollupEngine in Dart)
-    let income = 0n;
-    let incomeDeduction = 0n;
-    let adjustments = 0n;
-    let spending = 0n;
-    let protection = 0n;
-    let saving = 0n;
+    let income = 0;
+    let incomeDeduction = 0;
+    let adjustments = 0;
+    let spending = 0;
+    let protection = 0;
+    let saving = 0;
 
     for (const e of entries) {
       const amt = e.amountPaise;
@@ -85,15 +85,15 @@ export class ReportsService {
       include: { movements: true },
     });
 
-    let totalReserves = 0n;
+    let totalReserves = 0;
     for (const f of funds) {
       const fundOpening = f.openingReservePaise;
       const contributions = f.movements
         .filter((m) => m.type === 'contribution')
-        .reduce((sum, m) => sum + m.amountPaise, 0n);
+        .reduce((sum, m) => sum + m.amountPaise, 0);
       const withdrawals = f.movements
         .filter((m) => m.type === 'withdrawal')
-        .reduce((sum, m) => sum + m.amountPaise, 0n);
+        .reduce((sum, m) => sum + m.amountPaise, 0);
       totalReserves += this.engine.closingReserve(fundOpening, contributions, withdrawals);
     }
 
@@ -101,7 +101,7 @@ export class ReportsService {
     const accounts = await this.prisma.account.findMany({
       where: { householdId, isActive: true },
     });
-    const totalAvailable = accounts.reduce((sum, a) => sum + a.currentBalancePaise, 0n);
+    const totalAvailable = accounts.reduce((sum, a) => sum + a.currentBalancePaise, 0);
 
     // 6. Fetch credit card outstanding
     const cards = await this.prisma.creditCard.findMany({
@@ -109,20 +109,20 @@ export class ReportsService {
       include: { transactions: true },
     });
     const ccOutstanding = cards.reduce((sum, c) => {
-      const outstanding = c.transactions.reduce((s, t) => s + t.amountPaise, 0n);
+      const outstanding = c.transactions.reduce((s, t) => s + t.amountPaise, 0);
       return sum + c.previousOutstandingPaise + outstanding;
-    }, 0n);
+    }, 0);
 
     // 7. Fetch receivables (Return Awaited) and planned bills (To be Paid)
     const receivables = await this.prisma.receivable.findMany({
       where: { householdId, status: 'open' },
     });
-    const returnAwaited = receivables.reduce((sum, r) => sum + r.amountPaise, 0n);
+    const returnAwaited = receivables.reduce((sum, r) => sum + r.amountPaise, 0);
 
     const plannedBills = await this.prisma.plannedBill.findMany({
       where: { householdId, isPaid: false },
     });
-    const toBePaid = plannedBills.reduce((sum, b) => sum + b.amountPaise, 0n);
+    const toBePaid = plannedBills.reduce((sum, b) => sum + b.amountPaise, 0);
 
     // 8. Run waterfall calculation
     const waterfall = this.engine.computeWaterfall({
@@ -138,21 +138,21 @@ export class ReportsService {
 
     return {
       waterfall: {
-        openingBalance: Number(openingBalance),
-        lastMonthReserves: Number(lastMonthReserves),
-        income: Number(netIncome),
-        adjustments: Number(adjustments),
-        spending: Number(spending),
-        protection: Number(protection),
-        saving: Number(saving),
-        reservesSetAside: Number(totalReserves),
-        remaining: Number(waterfall.remaining),
+        openingBalance,
+        lastMonthReserves,
+        income: netIncome,
+        adjustments,
+        spending,
+        protection,
+        saving,
+        reservesSetAside: totalReserves,
+        remaining: waterfall.remaining,
       },
       accounts: {
-        totalAvailable: Number(totalAvailable),
-        ccOutstanding: Number(ccOutstanding),
-        returnAwaited: Number(returnAwaited),
-        toBePaid: Number(toBePaid),
+        totalAvailable,
+        ccOutstanding,
+        returnAwaited,
+        toBePaid,
       },
     };
   }
@@ -180,11 +180,11 @@ export class ReportsService {
 
     return categories.map((cat) => {
       const b = budgets.find((x) => x.categoryId === cat.id);
-      const budgetAmount = b ? b.amountPaise : 0n;
+      const budgetAmount = b ? b.amountPaise : 0;
 
       const actualAmount = entries
         .filter((e) => e.categoryId === cat.id)
-        .reduce((sum, e) => sum + e.amountPaise, 0n);
+        .reduce((sum, e) => sum + e.amountPaise, 0);
 
       const computed = this.engine.computeBudgetLine(budgetAmount, actualAmount);
 
@@ -192,9 +192,9 @@ export class ReportsService {
         categoryId: cat.id,
         categoryName: cat.name,
         kind: cat.kind,
-        budget: Number(budgetAmount),
-        actual: Number(actualAmount),
-        difference: Number(computed.difference),
+        budget: budgetAmount,
+        actual: actualAmount,
+        difference: computed.difference,
         pctUsed: computed.pctUsed,
         isOverBudget: computed.isOverBudget,
         isNearBudget: computed.isNearBudget,

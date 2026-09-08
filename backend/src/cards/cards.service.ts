@@ -41,7 +41,7 @@ export class CardsService {
       data: {
         householdId,
         name,
-        previousOutstandingPaise: BigInt(previousOutstandingPaise),
+        previousOutstandingPaise: Math.round(Number(previousOutstandingPaise)),
       },
     });
   }
@@ -60,7 +60,7 @@ export class CardsService {
       data: {
         cardId,
         description,
-        amountPaise: BigInt(amountPaise),
+        amountPaise: Math.round(Number(amountPaise)),
         txnDate: new Date(),
       },
     });

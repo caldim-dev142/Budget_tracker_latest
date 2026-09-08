@@ -23,7 +23,7 @@ export class AccountsService {
         householdId,
         name,
         type,
-        currentBalancePaise: BigInt(balancePaise),
+        currentBalancePaise: balancePaise,
       },
     });
   }
@@ -35,7 +35,7 @@ export class AccountsService {
 
     return this.prisma.account.update({
       where: { id },
-      data: { currentBalancePaise: BigInt(balancePaise) },
+      data: { currentBalancePaise: balancePaise },
     });
   }
 }

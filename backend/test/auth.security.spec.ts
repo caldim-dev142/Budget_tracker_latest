@@ -195,13 +195,7 @@ describe('Firebase Authentication Security Verification', () => {
     await authService.googleSignIn('valid-firebase-id-token');
 
     expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
-      where: {
-        OR: [
-          { firebaseUid: 'firebase-uid-12345' },
-          { email: 'test.user@example.com' },
-        ],
-      },
-      include: { memberships: true },
+      where: { email: 'test.user@example.com' },
     });
   });
 

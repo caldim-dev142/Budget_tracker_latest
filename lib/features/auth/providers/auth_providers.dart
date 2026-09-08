@@ -10,7 +10,7 @@ import '../../../core/security/password_hasher.dart';
 import '../../../core/security/secure_store.dart';
 import '../../../core/services/app_init_service.dart';
 
-final serverUrlProvider = StateProvider<String>((_) => 'http://192.168.1.94:3001');
+final serverUrlProvider = StateProvider<String>((_) => 'http://192.168.1.166:3001');
 final tokenProvider = StateProvider<String?>((_) => null);
 
 enum AuthMode { authenticated, offline, guest }
@@ -459,6 +459,51 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     final normEmail = email.trim().toLowerCase();
 
     try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      try {
+        final res = await _dio.post(
+          '$serverUrl/auth/register',
+          data: {
+            'email': normEmail,
+            'password': password,
+            'displayName': displayName,
+            'householdName': householdName,
+          },
+        );
+        final data = res.data;
+        final token = data['accessToken'];
+        final refreshToken = data['refreshToken'];
+        final user = data['user'];
+
+        if (token != null) {
+          await SecureStore.writeAccessToken(token);
+          if (refreshToken != null) {
+            await SecureStore.writeRefreshToken(refreshToken);
+          }
+          await SecureStore.write('auth_email', user['email']);
+          await SecureStore.write('auth_name', user['displayName']);
+          await SecureStore.write('auth_user_id', user['id']);
+          await SecureStore.write('auth_household_id', user['householdId']);
+
+          await AppInitService.ensureUserHouseholdSeed(db, user['householdId']);
+
+          _ref.read(tokenProvider.notifier).state = token;
+          state = AsyncValue.data(AuthState(
+            authMode: AuthMode.authenticated,
+            isAuthenticated: true,
+            email: user['email'],
+            displayName: user['displayName'],
+            householdId: user['householdId'],
+            userId: user['id'],
+            token: token,
+            authProvider: 'email',
+          ));
+          return;
+        }
+      } catch (_) {
+        // Fallback to local database registration
+      }
+
       final existing = await (db.select(db.usersTable)
             ..where((u) => u.email.equals(normEmail)))
           .get();
@@ -499,7 +544,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       _ref.read(tokenProvider.notifier).state = token;
 
       state = AsyncValue.data(AuthState(
-        authMode: AuthMode.authenticated,
+        authMode: AuthMode.offline,
         isAuthenticated: true,
         email: normEmail,
         displayName: finalDisplayName,

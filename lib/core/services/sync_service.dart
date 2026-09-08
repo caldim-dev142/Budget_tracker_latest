@@ -62,15 +62,34 @@ class SyncService {
       );
       print('Sync successful for entry ${entry.id}');
     } catch (e) {
-      print('Sync failed: $e. Leaving in offline queue.');
+      print('Sync failed: $e. Enqueuing in offline queue.');
+      try {
+        final db = _ref.read(appDatabaseProvider);
+        await db.syncQueueDao.enqueue(
+          id: entry.id,
+          op: 'insert',
+          entity: 'entry',
+          entityId: entry.id,
+          payload: {
+            'id': entry.id,
+            'categoryId': entry.categoryId,
+            'kind': entry.kind.name,
+            'accountId': entry.accountId,
+            'cardId': entry.cardId,
+            'entryDate': entry.entryDate.toIso8601String(),
+            'amountPaise': entry.amount.paise,
+            'note': entry.note,
+            'parentId': entry.parentId,
+            'version': entry.version,
+            'createdAt': entry.createdAt.toIso8601String(),
+            'updatedAt': entry.updatedAt.toIso8601String(),
+          },
+        );
+      } catch (_) {}
     }
   }
 
   Future<int> syncAllQueue() async {
-    final db = _ref.read(appDatabaseProvider);
-    final pending = await db.syncQueueDao.getPending();
-    if (pending.isEmpty) return 0;
-
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
@@ -82,6 +101,10 @@ class SyncService {
     final token = authState.token;
     if (token == null) return 0;
 
+    final db = _ref.read(appDatabaseProvider);
+
+    // 1. Process pending offline ops queue if any
+    final pending = await db.syncQueueDao.getPending();
     int successCount = 0;
     for (final op in pending) {
       if (op.entity == 'entry') {
@@ -105,6 +128,43 @@ class SyncService {
         }
       }
     }
+
+    // 2. Also ensure all local entries in entriesTable are pushed to backend (force sync)
+    try {
+      final allEntries = await (db.select(db.entriesTable)).get();
+      if (allEntries.isNotEmpty) {
+        final payloads = allEntries.map((e) => {
+          'id': e.id,
+          'categoryId': e.categoryId,
+          'kind': e.kind,
+          'accountId': e.accountId,
+          'cardId': e.cardId,
+          'entryDate': e.entryDate.toIso8601String(),
+          'amountPaise': e.amountPaise,
+          'note': e.note,
+          'parentId': e.parentId,
+          'version': e.version,
+          'createdAt': e.createdAt.toIso8601String(),
+          'updatedAt': e.updatedAt.toIso8601String(),
+        }).toList();
+
+        await _dio.post(
+          '$serverUrl/entries/batch',
+          data: payloads,
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $token',
+            },
+          ),
+        );
+        print('Force Sync: Synced ${allEntries.length} local entries to server.');
+        return allEntries.length;
+      }
+    } catch (e) {
+      print('Error during full local entries sync: $e');
+      rethrow;
+    }
+
     return successCount;
   }
 }

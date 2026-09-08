@@ -12,7 +12,6 @@ export class UsersService {
         id: true,
         email: true,
         displayName: true,
-        role: true,
         createdAt: true,
       },
     });
@@ -28,7 +27,6 @@ export class UsersService {
         id: true,
         email: true,
         displayName: true,
-        role: true,
       },
     });
   }

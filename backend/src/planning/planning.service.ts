@@ -17,7 +17,7 @@ export class PlanningService {
       data: {
         householdId,
         personName,
-        amountPaise: BigInt(amountPaise),
+        amountPaise: Math.round(Number(amountPaise)),
         dueDate: dueDate ? new Date(dueDate) : null,
       },
     });
@@ -46,7 +46,7 @@ export class PlanningService {
       data: {
         householdId,
         name,
-        amountPaise: BigInt(amountPaise),
+        amountPaise: Math.round(Number(amountPaise)),
         dueDate: dueDate ? new Date(dueDate) : null,
       },
     });
@@ -79,10 +79,10 @@ export class PlanningService {
           householdId,
           yearMonth,
           name: l.name,
-          amountPaise: BigInt(l.amountPaise),
+          amountPaise: Math.round(Number(l.amountPaise)),
         },
         update: {
-          amountPaise: BigInt(l.amountPaise),
+          amountPaise: Math.round(Number(l.amountPaise)),
         },
       }),
     );

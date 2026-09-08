@@ -24,17 +24,17 @@ describe('TypeScript Calculation Engine - Parity Verification', () => {
     const expected = s.expected.remaining;
 
     const result = computeWaterfall({
-      openingBalance: BigInt(input.openingBalance),
-      lastMonthReserves: BigInt(input.lastMonthReserves),
-      income: BigInt(input.income),
-      adjustments: BigInt(input.adjustments),
-      spending: BigInt(input.spending),
-      protection: BigInt(input.protection),
-      saving: BigInt(input.saving),
-      reservesSetAside: BigInt(input.reservesSetAside),
+      openingBalance: Number(input.openingBalance),
+      lastMonthReserves: Number(input.lastMonthReserves),
+      income: Number(input.income),
+      adjustments: Number(input.adjustments),
+      spending: Number(input.spending),
+      protection: Number(input.protection),
+      saving: Number(input.saving),
+      reservesSetAside: Number(input.reservesSetAside),
     });
 
-    expect(result.remaining).toBe(BigInt(expected));
+    expect(result.remaining).toBe(Number(expected));
   });
 
   it('should run scenario: with_opening_balance and match golden remaining', () => {
@@ -43,17 +43,17 @@ describe('TypeScript Calculation Engine - Parity Verification', () => {
     const expected = s.expected.remaining;
 
     const result = computeWaterfall({
-      openingBalance: BigInt(input.openingBalance),
-      lastMonthReserves: BigInt(input.lastMonthReserves),
-      income: BigInt(input.income - input.incomeDeductions),
-      adjustments: BigInt(input.adjustments),
-      spending: BigInt(input.spending),
-      protection: BigInt(input.protection),
-      saving: BigInt(input.saving),
-      reservesSetAside: BigInt(input.reservesSetAside),
+      openingBalance: Number(input.openingBalance),
+      lastMonthReserves: Number(input.lastMonthReserves),
+      income: Number(input.income - input.incomeDeductions),
+      adjustments: Number(input.adjustments),
+      spending: Number(input.spending),
+      protection: Number(input.protection),
+      saving: Number(input.saving),
+      reservesSetAside: Number(input.reservesSetAside),
     });
 
-    expect(result.remaining).toBe(BigInt(expected));
+    expect(result.remaining).toBe(Number(expected));
   });
 
   it('should run scenario: budget_pct_over and match budget difference', () => {
@@ -61,9 +61,9 @@ describe('TypeScript Calculation Engine - Parity Verification', () => {
     const input = s.input;
     const expected = s.expected;
 
-    const result = computeBudgetLine(BigInt(input.budget), BigInt(input.actual));
+    const result = computeBudgetLine(Number(input.budget), Number(input.actual));
 
-    expect(result.difference).toBe(BigInt(expected.difference));
+    expect(result.difference).toBe(Number(expected.difference));
     expect(result.pctUsed).toBeCloseTo(expected.pctUsed, 3);
     expect(result.isOverBudget).toBe(expected.isOverBudget);
   });
@@ -74,12 +74,12 @@ describe('TypeScript Calculation Engine - Parity Verification', () => {
     const expected = s.expected;
 
     const closing = closingReserve(
-      BigInt(input.fundOpeningReserve),
-      BigInt(input.fundContributions),
-      BigInt(input.fundWithdrawals),
+      Number(input.fundOpeningReserve),
+      Number(input.fundContributions),
+      Number(input.fundWithdrawals),
     );
 
-    expect(closing).toBe(BigInt(expected.closingReserve));
+    expect(closing).toBe(Number(expected.closingReserve));
   });
 
   it('should run scenario: rollover_next_month and compute closing balance', () => {
@@ -87,8 +87,8 @@ describe('TypeScript Calculation Engine - Parity Verification', () => {
     const input = s.input;
     const expected = s.expected;
 
-    const balance = closingBalance(BigInt(input.totalAvailable), BigInt(input.reservesAtClose));
+    const balance = closingBalance(Number(input.totalAvailable), Number(input.reservesAtClose));
 
-    expect(balance).toBe(BigInt(expected.closingBalance));
+    expect(balance).toBe(Number(expected.closingBalance));
   });
 });

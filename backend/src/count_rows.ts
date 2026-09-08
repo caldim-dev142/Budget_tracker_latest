@@ -7,7 +7,6 @@ async function main() {
   
   try {
     const userCount = await prisma.user.count();
-    const householdCount = await prisma.household.count();
     const entryCount = await prisma.entry.count();
     const categoryCount = await prisma.category.count();
     const accountCount = await prisma.account.count();
@@ -15,7 +14,6 @@ async function main() {
 
     console.log('\n--- ROW COUNTS ---');
     console.log(`Users: ${userCount}`);
-    console.log(`Households: ${householdCount}`);
     console.log(`Entries (Transactions): ${entryCount}`);
     console.log(`Categories: ${categoryCount}`);
     console.log(`Accounts: ${accountCount}`);
