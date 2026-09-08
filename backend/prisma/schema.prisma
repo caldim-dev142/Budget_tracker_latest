@@ -7,12 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Household {
+  id        String   @id @default(uuid())
+  name      String
+  ownerId   String   @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("households")
+}
+
 model User {
   id            String   @id @default(uuid())
   email         String
   password      String?
   displayName   String   @map("display_name")
-  household_id  String
+  household_id  String?
   auth_provider String   @default("email")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 

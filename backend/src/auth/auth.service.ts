@@ -55,14 +55,14 @@ export class AuthService {
       await this.seedCategoriesForHousehold(householdId);
     }
 
-    const tokens = await this.issueTokens(user.id, user.household_id);
+    const tokens = await this.issueTokens(user.id, user.household_id ?? '');
     return {
       ...tokens,
       user: {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
-        householdId: user.household_id,
+        householdId: user.household_id ?? '',
       },
     };
   }
@@ -118,33 +118,31 @@ export class AuthService {
     const valid = await argon2.verify(user.password, dto.password);
     if (!valid) throw new UnauthorizedException('Invalid credentials.');
 
-    const tokens = await this.issueTokens(user.id, user.household_id);
+    const tokens = await this.issueTokens(user.id, user.household_id ?? '');
     return {
       ...tokens,
       user: {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
-        householdId: user.household_id,
+        householdId: user.household_id ?? '',
       },
     };
   }
 
-  async refresh(userId: string, tokenHash: string, family: string) {
+  async refresh(userId: string, tokenHash: string, family?: string) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId },
     });
-    if (!user) {
-      throw new UnauthorizedException('User not found.');
-    }
-    return this.issueTokens(userId, user.household_id, family);
+    if (!user) throw new UnauthorizedException('User not found.');
+    return this.issueTokens(userId, user.household_id ?? '', family);
   }
 
   async logout(userId: string, family: string) {
     // Stateless logout fallback
   }
 
-  private async issueTokens(userId: string, householdId: string, family?: string) {
+  async issueTokens(userId: string, householdId: string, family?: string) {
     const payload = { sub: userId, householdId };
     const accessToken = this.jwtService.sign(payload, {
       secret: this.config.get('JWT_ACCESS_SECRET'),
