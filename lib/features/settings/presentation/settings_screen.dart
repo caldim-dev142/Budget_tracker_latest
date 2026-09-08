@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' hide Column;
@@ -73,8 +74,8 @@ class SettingsScreen extends ConsumerWidget {
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(color: const Color(0xFF4285F4).withValues(alpha: 0.3)),
                                   ),
-                                  child: Row(
-                                    children: const [
+                                  child: const Row(
+                                    children: [
                                       Text('G ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFF4285F4))),
                                       Text(
                                         'Google Authenticated',
@@ -208,69 +209,14 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showHouseholdDialog(BuildContext context, WidgetRef ref) {
-    final currentName = ref.read(householdNameProvider);
-    final ctrl = TextEditingController(text: currentName);
-
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Manage Household'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Household ID: demo-household', style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              decoration: const InputDecoration(
-                labelText: 'Household Name',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              ref.read(householdNameProvider.notifier).state = ctrl.text.trim();
-              Navigator.pop(context);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (dialogCtx) => _ManageHouseholdDialog(ref: ref),
     );
   }
 
   void _showMembersDialog(BuildContext context, WidgetRef ref, AuthState authState) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Household Members'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
-              title: Text(authState.displayName ?? 'User'),
-              subtitle: Text('${authState.email ?? ""} (Owner)'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+    _showHouseholdDialog(context, ref);
   }
 
   void _showCategoriesDialog(BuildContext context, WidgetRef ref) {
@@ -322,7 +268,7 @@ class SettingsScreen extends ConsumerWidget {
                         itemCount: cats.length,
                         itemBuilder: (context, i) {
                           final c = cats[i];
-                          final isSystem = c.isSystem ?? false;
+                          final isSystem = c.isSystem;
                           return ListTile(
                             title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                             subtitle: Text('${c.kind.toUpperCase()} ${c.needOrWant != null ? "• ${c.needOrWant}" : ""}'),
@@ -398,7 +344,7 @@ class SettingsScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: kind,
+                initialValue: kind,
                 decoration: const InputDecoration(labelText: 'Type'),
                 items: const [
                   DropdownMenuItem(value: 'spending', child: Text('Expense')),
@@ -414,7 +360,7 @@ class SettingsScreen extends ConsumerWidget {
               if (kind == 'spending') ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: needOrWant,
+                  initialValue: needOrWant,
                   decoration: const InputDecoration(labelText: 'Need / Want'),
                   items: const [
                     DropdownMenuItem(value: 'need', child: Text('Need')),
@@ -515,7 +461,9 @@ class SettingsScreen extends ConsumerWidget {
 
                     final db = ref.read(appDatabaseProvider);
                     final auth = ref.read(authStateProvider).valueOrNull;
-                    final householdId = auth?.householdId ?? 'demo-household';
+                    final householdId = (auth?.householdId != null && auth!.householdId!.isNotEmpty)
+                        ? auth.householdId!
+                        : 'local';
 
                     await db.categoryDao.upsertAll([
                       CategoriesTableCompanion.insert(
@@ -735,6 +683,579 @@ class _SectionHeader extends StatelessWidget {
               color: Theme.of(context).colorScheme.primary,
               fontWeight: FontWeight.w700,
             ),
+      ),
+    );
+  }
+}
+
+class _ManageHouseholdDialog extends StatefulWidget {
+  final WidgetRef ref;
+  const _ManageHouseholdDialog({required this.ref});
+
+  @override
+  State<_ManageHouseholdDialog> createState() => _ManageHouseholdDialogState();
+}
+
+class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
+  bool _loading = true;
+  Map<String, dynamic>? _household;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHousehold();
+  }
+
+  Future<void> _loadHousehold() async {
+    setState(() => _loading = true);
+    try {
+      final details = await widget.ref
+          .read(authStateNotifierProvider.notifier)
+          .fetchHouseholdDetails();
+      if (mounted) {
+        setState(() {
+          _household = details;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  Future<void> _handleCreateHousehold() async {
+    final nameCtrl = TextEditingController(
+      text: '${widget.ref.read(authStateProvider).valueOrNull?.displayName ?? "My"}\'s Household',
+    );
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Create Household'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'A new unique household ID will be generated automatically once you click Create.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Household Name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        final newId = await widget.ref
+            .read(authStateNotifierProvider.notifier)
+            .createHousehold(nameCtrl.text.trim());
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Household created! ID: $newId')),
+          );
+          _loadHousehold();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to create household: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _handleJoinHousehold() async {
+    final idCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Join Household'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the household ID shared by your family owner to join their household.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: idCtrl,
+              decoration: InputDecoration(
+                labelText: 'Household ID',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.paste_rounded),
+                  onPressed: () async {
+                    final data = await Clipboard.getData(Clipboard.kTextPlain);
+                    if (data?.text != null) {
+                      idCtrl.text = data!.text!.trim();
+                    }
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Join'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final inputId = idCtrl.text.trim();
+      if (inputId.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a valid Household ID.')),
+        );
+        return;
+      }
+      try {
+        await widget.ref
+            .read(authStateNotifierProvider.notifier)
+            .joinHousehold(inputId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Successfully joined household!')),
+          );
+          _loadHousehold();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _handleUpdateName(String currentName) async {
+    final ctrl = TextEditingController(text: currentName);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Update Household Name'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            labelText: 'New Household Name',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final newName = ctrl.text.trim();
+      if (newName.isEmpty) return;
+      try {
+        await widget.ref
+            .read(authStateNotifierProvider.notifier)
+            .updateHouseholdName(newName);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Household name updated!')),
+          );
+          _loadHousehold();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to update name: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _handleDeleteHousehold(String householdName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Household'),
+        content: Text(
+          'Are you sure you want to delete "$householdName"?\n\nAll member associations and household data will be permanently removed. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete Household'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        await widget.ref
+            .read(authStateNotifierProvider.notifier)
+            .deleteHousehold();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Household deleted successfully.')),
+          );
+          Navigator.pop(context);
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to delete household: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _handleRemoveMember(String memberId, String memberName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove Family Member'),
+        content: Text(
+          'Remove "$memberName" from this household?\n\nThey will lose access to this household without affecting other members.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        await widget.ref
+            .read(authStateNotifierProvider.notifier)
+            .removeHouseholdMember(memberId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Removed "$memberName" from household.')),
+          );
+          _loadHousehold();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to remove member: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final household = _household;
+    final isOwner = household?['isOwner'] == true;
+    final members = (household?['members'] as List<dynamic>?) ?? [];
+    final householdId = household?['id'] as String?;
+    final householdName = household?['name'] as String? ?? 'Family Household';
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 680),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.roofing_rounded, color: cs.primary, size: 28),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Manage Household',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Two Required Options: Create Household and Join Household
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.add_home_rounded, size: 18),
+                      label: const Text('Create Household', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: _handleCreateHousehold,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.group_add_rounded, size: 18),
+                      label: const Text('Join Household', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: _handleJoinHousehold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+
+              // Content: Loading / Household Info & Members / Empty
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : householdId == null || householdId.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.home_outlined, size: 48, color: cs.outline),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'No Household Associated',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'Choose "Create Household" to generate a new household or "Join Household" to join an existing family.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            children: [
+                              // Household Info Card
+                              Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            householdName,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                          ),
+                                        ),
+                                        if (isOwner)
+                                          IconButton(
+                                            icon: const Icon(Icons.edit_outlined, size: 18),
+                                            tooltip: 'Update Household Name',
+                                            onPressed: () => _handleUpdateName(householdName),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: SelectableText(
+                                            'ID: $householdId',
+                                            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.copy_rounded, size: 16),
+                                          tooltip: 'Copy Household ID',
+                                          onPressed: () {
+                                            Clipboard.setData(ClipboardData(text: householdId));
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Household ID copied to clipboard!')),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isOwner ? cs.primaryContainer : cs.secondaryContainer,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        isOwner ? '👑 Family Owner' : '👤 Member',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: isOwner ? cs.onPrimaryContainer : cs.onSecondaryContainer,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 16),
+                              // Members Section
+                              Row(
+                                children: [
+                                  Icon(Icons.people_alt_outlined, size: 18, color: cs.primary),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Joined Members (${members.length})',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+
+                              ...members.map((m) {
+                                final member = m as Map<String, dynamic>;
+                                final mId = member['id'] as String? ?? '';
+                                final mName = member['displayName'] as String? ?? 'User';
+                                final mEmail = member['email'] as String? ?? '';
+                                final mRole = member['role'] as String? ?? 'member';
+                                final isMemberOwner = mRole == 'owner';
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: cs.surface,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+                                  ),
+                                  child: ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor: isMemberOwner ? cs.primaryContainer : cs.surfaceContainerHighest,
+                                      child: Text(
+                                        mName.isNotEmpty ? mName[0].toUpperCase() : '?',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: isMemberOwner ? cs.onPrimaryContainer : cs.onSurface,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(mName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                    subtitle: Text(mEmail, style: const TextStyle(fontSize: 12)),
+                                    trailing: isMemberOwner
+                                        ? const Chip(
+                                            label: Text('Owner', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                            padding: EdgeInsets.zero,
+                                            visualDensity: VisualDensity.compact,
+                                          )
+                                        : isOwner
+                                            ? IconButton(
+                                                icon: const Icon(Icons.person_remove_outlined, color: Colors.red, size: 20),
+                                                tooltip: 'Remove Member',
+                                                onPressed: () => _handleRemoveMember(mId, mName),
+                                              )
+                                            : const Chip(
+                                                label: Text('Member', style: TextStyle(fontSize: 10)),
+                                                padding: EdgeInsets.zero,
+                                                visualDensity: VisualDensity.compact,
+                                              ),
+                                  ),
+                                );
+                              }),
+
+                              // Delete Household Button (Owner only)
+                              if (isOwner) ...[
+                                const SizedBox(height: 16),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: cs.error,
+                                    side: BorderSide(color: cs.error.withValues(alpha: 0.5)),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                  icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                                  label: const Text('Delete Household', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  onPressed: () => _handleDeleteHousehold(householdName),
+                                ),
+                              ],
+                            ],
+                          ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

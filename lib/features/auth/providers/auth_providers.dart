@@ -566,6 +566,179 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     }
   }
 
+  /// Fetch household details & member list from backend
+  Future<Map<String, dynamic>?> fetchHouseholdDetails() async {
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      final res = await _dio.get('$serverUrl/households/me');
+      if (res.data != null && res.data['household'] != null) {
+        return Map<String, dynamic>.from(res.data['household']);
+      }
+    } catch (e) {
+      debugPrint('fetchHouseholdDetails error: $e');
+    }
+    return null;
+  }
+
+  /// Create a new household (generates ID only when triggered)
+  Future<String?> createHousehold(String name) async {
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      final res = await _dio.post(
+        '$serverUrl/households',
+        data: {'name': name.trim()},
+      );
+      final data = res.data;
+      final household = data['household'];
+      final newHouseholdId = household['id'] as String;
+      final tokens = data['tokens'];
+
+      if (tokens != null && tokens['accessToken'] != null) {
+        await SecureStore.writeAccessToken(tokens['accessToken']);
+        _ref.read(tokenProvider.notifier).state = tokens['accessToken'];
+      }
+      await SecureStore.write('auth_household_id', newHouseholdId);
+
+      // Seed Drift database for this new household
+      final db = _ref.read(appDatabaseProvider);
+      await AppInitService.ensureUserHouseholdSeed(db, newHouseholdId);
+
+      // Update local user in Drift table
+      final currentAuth = state.valueOrNull;
+      if (currentAuth?.userId != null) {
+        await (db.update(db.usersTable)..where((u) => u.id.equals(currentAuth!.userId!)))
+            .write(UsersTableCompanion(householdId: Value(newHouseholdId)));
+      }
+
+      if (state.valueOrNull != null) {
+        state = AsyncValue.data(state.value!.copyWith(householdId: newHouseholdId));
+      }
+
+      return newHouseholdId;
+    } catch (e) {
+      debugPrint('createHousehold error: $e');
+      if (e is DioException && e.response?.data != null) {
+        final msg = e.response?.data['message'];
+        if (msg != null) throw Exception(msg.toString());
+      }
+      rethrow;
+    }
+  }
+
+  /// Join an existing household using household ID
+  Future<void> joinHousehold(String householdId) async {
+    final trimmedId = householdId.trim();
+    if (trimmedId.isEmpty) {
+      throw Exception('Please enter a valid Household ID.');
+    }
+
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      final res = await _dio.post(
+        '$serverUrl/households/join',
+        data: {'householdId': trimmedId},
+      );
+      final data = res.data;
+      final tokens = data['tokens'];
+
+      if (tokens != null && tokens['accessToken'] != null) {
+        await SecureStore.writeAccessToken(tokens['accessToken']);
+        _ref.read(tokenProvider.notifier).state = tokens['accessToken'];
+      }
+      await SecureStore.write('auth_household_id', trimmedId);
+
+      // Seed Drift database for this joined household
+      final db = _ref.read(appDatabaseProvider);
+      await AppInitService.ensureUserHouseholdSeed(db, trimmedId);
+
+      // Update local user in Drift table
+      final currentAuth = state.valueOrNull;
+      if (currentAuth?.userId != null) {
+        await (db.update(db.usersTable)..where((u) => u.id.equals(currentAuth!.userId!)))
+            .write(UsersTableCompanion(householdId: Value(trimmedId)));
+      }
+
+      if (state.valueOrNull != null) {
+        state = AsyncValue.data(state.value!.copyWith(householdId: trimmedId));
+      }
+    } catch (e) {
+      debugPrint('joinHousehold error: $e');
+      if (e is DioException && e.response?.data != null) {
+        final msg = e.response?.data['message'];
+        if (msg != null) throw Exception(msg.toString());
+      }
+      rethrow;
+    }
+  }
+
+  /// Update household name (Owner only)
+  Future<void> updateHouseholdName(String newName) async {
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      await _dio.patch(
+        '$serverUrl/households/me',
+        data: {'name': newName.trim()},
+      );
+    } catch (e) {
+      debugPrint('updateHouseholdName error: $e');
+      if (e is DioException && e.response?.data != null) {
+        final msg = e.response?.data['message'];
+        if (msg != null) throw Exception(msg.toString());
+      }
+      rethrow;
+    }
+  }
+
+  /// Delete household (Owner only)
+  Future<void> deleteHousehold() async {
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      final res = await _dio.delete('$serverUrl/households/me');
+      final data = res.data;
+      final tokens = data['tokens'];
+
+      if (tokens != null && tokens['accessToken'] != null) {
+        await SecureStore.writeAccessToken(tokens['accessToken']);
+        _ref.read(tokenProvider.notifier).state = tokens['accessToken'];
+      }
+      await SecureStore.delete('auth_household_id');
+
+      // Update local user in Drift table
+      final db = _ref.read(appDatabaseProvider);
+      final currentAuth = state.valueOrNull;
+      if (currentAuth?.userId != null) {
+        await (db.update(db.usersTable)..where((u) => u.id.equals(currentAuth!.userId!)))
+            .write(const UsersTableCompanion(householdId: Value('')));
+      }
+
+      if (state.valueOrNull != null) {
+        state = AsyncValue.data(state.value!.copyWith(householdId: ''));
+      }
+    } catch (e) {
+      debugPrint('deleteHousehold error: $e');
+      if (e is DioException && e.response?.data != null) {
+        final msg = e.response?.data['message'];
+        if (msg != null) throw Exception(msg.toString());
+      }
+      rethrow;
+    }
+  }
+
+  /// Remove an individual member from household (Owner only)
+  Future<void> removeHouseholdMember(String memberId) async {
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      await _dio.delete('$serverUrl/households/members/$memberId');
+    } catch (e) {
+      debugPrint('removeHouseholdMember error: $e');
+      if (e is DioException && e.response?.data != null) {
+        final msg = e.response?.data['message'];
+        if (msg != null) throw Exception(msg.toString());
+      }
+      rethrow;
+    }
+  }
+
   Future<void> logout() async {
     try {
       final serverUrl = _ref.read(serverUrlProvider);

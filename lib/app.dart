@@ -16,7 +16,7 @@ class BudgetTrackerApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
-      title: 'CalFund',
+      title: 'BudgetIQ',
       debugShowCheckedModeBanner: false,
 
       // Material 3 theming seeded from deep teal #0E7C7B (doc 08)
