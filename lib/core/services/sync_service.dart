@@ -348,7 +348,6 @@ class SyncService {
 
     if (authState == null || authState.authMode != AuthMode.authenticated) {
       return false;
->>>>>>> 283a0f6341f663f11cb2321f2cb226f57b45390c
     }
 
     final token = authState.token;
