@@ -4,6 +4,7 @@ import 'package:drift/drift.dart' hide Column;
 
 import '../../../core/utils/money.dart';
 import '../../../data/local/database.dart';
+import '../../../core/services/sync_service.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
@@ -389,6 +390,7 @@ class _ReceivableCard extends ConsumerWidget {
         confirmDismiss: (_) => _confirmSettle(context, isReturn: true),
         onDismissed: (_) async {
           await ref.read(appDatabaseProvider).borrowLendDao.settleReceivable(item.id);
+          ref.read(syncServiceProvider).triggerSync();
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -565,6 +567,7 @@ class _PlannedBillCard extends ConsumerWidget {
         ),
         onDismissed: (_) async {
           await ref.read(appDatabaseProvider).borrowLendDao.settlePlannedBill(item.id);
+          ref.read(syncServiceProvider).triggerSync();
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -1005,6 +1008,7 @@ class _AddReceivableSheetState extends ConsumerState<_AddReceivableSheet> {
             dueDate: _dueDate,
             existingEntryId: widget.existing?.entryId,
           );
+      ref.read(syncServiceProvider).triggerSync();
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1194,6 +1198,7 @@ class _AddPlannedBillSheetState extends ConsumerState<_AddPlannedBillSheet> {
             dueDate: _dueDate,
             existingEntryId: widget.existing?.entryId,
           );
+      ref.read(syncServiceProvider).triggerSync();
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _saving = false);

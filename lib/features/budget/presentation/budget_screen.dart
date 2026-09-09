@@ -10,6 +10,8 @@ import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/utils/month.dart';
+import '../../../core/utils/category_icons.dart';
+import '../../../core/services/sync_service.dart';
 import '../../../data/local/database.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
@@ -109,6 +111,9 @@ class BudgetScreen extends ConsumerWidget {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+            final liveColor = categoryIconColor(kind);
+
             return AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Text(
@@ -120,6 +125,49 @@ class BudgetScreen extends ConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: liveColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: liveColor.withValues(alpha: 0.25)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: liveColor.withValues(alpha: 0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(liveIcon, color: liveColor, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Generated Icon',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: liveColor,
+                                  ),
+                                ),
+                                Text(
+                                  nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: nameCtrl,
                       decoration: const InputDecoration(
@@ -127,6 +175,7 @@ class BudgetScreen extends ConsumerWidget {
                         hintText: 'e.g. Groceries',
                       ),
                       autofocus: true,
+                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -135,10 +184,11 @@ class BudgetScreen extends ConsumerWidget {
                         labelText: 'Group / Subcategory *',
                         hintText: 'e.g. Food & Dining',
                       ),
+                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: kind,
+                      initialValue: kind,
                       isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Category Type'),
                       items: const [
@@ -152,8 +202,6 @@ class BudgetScreen extends ConsumerWidget {
                         if (v != null) setState(() => kind = v);
                       },
                     ),
-
-
                   ],
                 ),
               ),
@@ -185,6 +233,8 @@ class BudgetScreen extends ConsumerWidget {
                         sortOrder: const Value(100),
                       )
                     ]);
+
+                    ref.read(syncServiceProvider).triggerSync();
 
                     if (context.mounted) {
                       Navigator.pop(context);
@@ -257,7 +307,7 @@ class _BudgetPlannerTab extends ConsumerWidget {
           }
 
           for (final key in grouped.keys) {
-            grouped[key]!.sort((a, b) => (b.sortOrder ?? 0).compareTo(a.sortOrder ?? 0));
+            grouped[key]!.sort((a, b) => b.sortOrder.compareTo(a.sortOrder));
           }
 
           return ListView(
@@ -397,10 +447,14 @@ class _BudgetGroupCard extends ConsumerWidget {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: cs.primaryContainer.withValues(alpha: 0.5),
+            color: categoryGroupColor(groupName).withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(Icons.folder_open_rounded, color: cs.primary, size: 20),
+          child: Icon(
+            categoryGroupIcon(groupName),
+            color: categoryGroupColor(groupName),
+            size: 20,
+          ),
         ),
         title: Text(
           _toTitleCase(groupName),
@@ -477,12 +531,25 @@ class _BudgetGroupCard extends ConsumerWidget {
         children: [
           ...categories.map((cat) {
             final catBudget = budgetMap[cat.id] ?? 0;
+            final catColor = categoryIconColor(cat.kind);
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               child: PressableScale(
                 borderRadius: BorderRadius.circular(12),
                 onTap: () => _showSetBudgetDialog(context, ref, cat, catBudget),
                 child: ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: catColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      categoryIcon(cat.name, cat.kind, cat.groupCode),
+                      color: catColor,
+                      size: 20,
+                    ),
+                  ),
                   title: Text(
                     cat.name,
                     style: const TextStyle(fontWeight: FontWeight.w600),
@@ -678,6 +745,7 @@ class _BudgetGroupCard extends ConsumerWidget {
           await db.categoryDao.softArchive(cat.id);
         }
       }
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -742,6 +810,7 @@ class _BudgetGroupCard extends ConsumerWidget {
                           b.yearMonth.equals(ym.toString())))
                     .go();
                 if (context.mounted) Navigator.pop(context);
+                Future.microtask(() => ref.read(syncServiceProvider).syncAllQueue());
               },
               child: const Text('Clear Budget'),
             ),
@@ -778,6 +847,8 @@ class _BudgetGroupCard extends ConsumerWidget {
                   ),
                 );
               }
+
+              Future.microtask(() => ref.read(syncServiceProvider).syncAllQueue());
 
               if (context.mounted) {
                 Navigator.pop(context);
@@ -914,6 +985,7 @@ class _BudgetGroupCard extends ConsumerWidget {
     if (confirm == true) {
       final db = ref.read(appDatabaseProvider);
       await db.categoryDao.softArchive(cat.id);
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1048,10 +1120,14 @@ class _BudgetVsActualTab extends ConsumerWidget {
                                 Container(
                                   padding: const EdgeInsets.all(6),
                                   decoration: BoxDecoration(
-                                    color: cs.primaryContainer.withValues(alpha: 0.4),
+                                    color: categoryIconColor(cat.kind).withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Icon(Icons.label_outline_rounded, size: 16, color: cs.primary),
+                                  child: Icon(
+                                    categoryIcon(cat.name, cat.kind, cat.groupCode),
+                                    size: 16,
+                                    color: categoryIconColor(cat.kind),
+                                  ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(

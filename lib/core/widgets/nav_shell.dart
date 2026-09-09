@@ -22,7 +22,7 @@ class NavShell extends StatelessWidget {
     for (int i = 0; i < _tabs.length; i++) {
       if (location.startsWith(_tabs[i].path)) return i;
     }
-    return 0;
+    return -1; // Not a main tab route — no FAB
   }
 
   @override
@@ -53,7 +53,7 @@ class NavShell extends StatelessWidget {
           ],
         ),
         child: NavigationBar(
-          selectedIndex: selectedIndex,
+          selectedIndex: selectedIndex.clamp(0, _tabs.length - 1),
           onDestinationSelected: (i) => context.go(_tabs[i].path),
           indicatorColor: const Color(0xFFE0F2F1),
           destinations: _tabs

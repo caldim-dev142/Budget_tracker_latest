@@ -5,13 +5,14 @@ import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../../core/utils/csv_exporter/csv_exporter.dart';
+import '../../../core/utils/category_icons.dart';
+import '../../../core/utils/timezone_utils.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../providers/settings_providers.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../../data/local/database.dart';
 import '../../../core/services/sync_service.dart';
-
-final biometricLockProvider = StateProvider<bool>((ref) => false);
+import '../../../core/security/app_lock_service.dart';
 final householdNameProvider = StateProvider<String>((ref) => 'Smith Family');
 
 /// S18 — Settings / Profile / Household (doc 09 S18).
@@ -22,7 +23,8 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final authState = ref.watch(authStateNotifierProvider).valueOrNull;
-    final biometricLock = ref.watch(biometricLockProvider);
+    final lockEnabled = ref.watch(appLockEnabledProvider);
+    final selectedTzId = ref.watch(selectedTimezoneIdProvider);
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -109,6 +111,14 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => _showThemePicker(context, ref, themeMode),
           ),
+          const SizedBox(height: 6),
+          _SettingsTile(
+            icon: Icons.schedule_outlined,
+            title: 'Timezone',
+            subtitle: kTimezones.firstWhere((tz) => tz.id == selectedTzId, orElse: () => kTimezones.first).label,
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _showTimezonePicker(context, ref, selectedTzId),
+          ),
 
           // Household
           const SizedBox(height: 12),
@@ -172,12 +182,82 @@ class SettingsScreen extends ConsumerWidget {
           const _SectionHeader('Security'),
           Card(
             child: ListTile(
-              leading: Icon(Icons.fingerprint_rounded, color: cs.primary),
-              title: const Text('Biometric Lock', style: TextStyle(fontWeight: FontWeight.w600)),
+              leading: Icon(Icons.lock_outline_rounded, color: cs.primary),
+              title: const Text('Lock App', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                lockEnabled ? 'Uses device authentication' : 'Off',
+                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              ),
               trailing: Switch(
-                value: biometricLock,
-                onChanged: (v) {
-                  ref.read(biometricLockProvider.notifier).state = v;
+                value: lockEnabled,
+                onChanged: (v) async {
+                  final svc = ref.read(appLockServiceProvider);
+                  if (v) {
+                    final supported = await svc.canAuthenticate();
+                    if (!supported) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('No lock screen configured on this device. Set up a PIN, pattern, or biometric first.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    final ok = await svc.authenticate(
+                      reason: 'Authenticate to enable Lock App',
+                    );
+                    if (!ok) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Authentication failed or cancelled.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    await svc.setEnabled(true);
+                    ref.read(appUnlockedProvider.notifier).state = true;
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Lock App enabled.'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  } else {
+                    final ok = await svc.authenticate(
+                      reason: 'Authenticate to disable Lock App',
+                    );
+                    if (!ok) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Authentication failed. Lock App remains enabled.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    await svc.setEnabled(false);
+                    ref.read(appUnlockedProvider.notifier).state = true;
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Lock App disabled.'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  }
                 },
               ),
             ),
@@ -272,7 +352,18 @@ class SettingsScreen extends ConsumerWidget {
                           return ListTile(
                             title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600)),
                             subtitle: Text('${c.kind.toUpperCase()} ${c.needOrWant != null ? "• ${c.needOrWant}" : ""}'),
-                            leading: const Icon(Icons.category_rounded),
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: categoryIconColor(c.kind).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                categoryIcon(c.name, c.kind, c.groupCode),
+                                color: categoryIconColor(c.kind),
+                                size: 20,
+                              ),
+                            ),
                             trailing: !isSystem
                                 ? Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -326,97 +417,83 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showEditCategoryDialog(BuildContext context, WidgetRef ref, CategoriesTableData cat) {
     final nameCtrl = TextEditingController(text: cat.name);
+    final groupCtrl = TextEditingController(text: cat.groupCode ?? '');
     String kind = cat.kind;
     String needOrWant = cat.needOrWant ?? 'need';
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Edit Custom Category'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Category Name'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: kind,
-                decoration: const InputDecoration(labelText: 'Type'),
-                items: const [
-                  DropdownMenuItem(value: 'spending', child: Text('Expense')),
-                  DropdownMenuItem(value: 'income', child: Text('Income')),
-                  DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
-                  DropdownMenuItem(value: 'protection', child: Text('Protection')),
-                  DropdownMenuItem(value: 'saving', child: Text('Saving')),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => kind = v);
-                },
-              ),
-              if (kind == 'spending') ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: needOrWant,
-                  decoration: const InputDecoration(labelText: 'Need / Want'),
-                  items: const [
-                    DropdownMenuItem(value: 'need', child: Text('Need')),
-                    DropdownMenuItem(value: 'want', child: Text('Want')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => needOrWant = v);
-                  },
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () async {
-                final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
+        builder: (context, setState) {
+          final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+          final liveColor = categoryIconColor(kind);
 
-                final db = ref.read(appDatabaseProvider);
-                await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
-                    .write(CategoriesTableCompanion(
-                  name: Value(name),
-                  kind: Value(kind),
-                  needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
-                ));
-
-                if (context.mounted) Navigator.pop(context);
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showAddCategoryDialog(BuildContext context, WidgetRef ref) {
-    final nameCtrl = TextEditingController();
-    String kind = 'spending';
-    String needOrWant = 'need';
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Text('Add Custom Category'),
-              content: Column(
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Edit Custom Category'),
+            content: SingleChildScrollView(
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: liveColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: liveColor.withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: liveColor.withValues(alpha: 0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(liveIcon, color: liveColor, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Generated Icon',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: liveColor,
+                                ),
+                              ),
+                              Text(
+                                nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                   TextField(
                     controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Category Name'),
+                    decoration: const InputDecoration(
+                      labelText: 'Category Name *',
+                      hintText: 'e.g. Groceries, Fuel, Netflix',
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: groupCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Subcategory / Group',
+                      hintText: 'e.g. Food & Dining, Travel, Bills',
+                    ),
+                    onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
@@ -449,6 +526,148 @@ class SettingsScreen extends ConsumerWidget {
                   ],
                 ],
               ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () async {
+                  final name = nameCtrl.text.trim();
+                  final group = groupCtrl.text.trim();
+                  if (name.isEmpty) return;
+
+                  final db = ref.read(appDatabaseProvider);
+                  await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
+                      .write(CategoriesTableCompanion(
+                    name: Value(name),
+                    groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
+                    kind: Value(kind),
+                    needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                  ));
+
+                  if (context.mounted) Navigator.pop(context);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAddCategoryDialog(BuildContext context, WidgetRef ref) {
+    final nameCtrl = TextEditingController();
+    final groupCtrl = TextEditingController();
+    String kind = 'spending';
+    String needOrWant = 'need';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+            final liveColor = categoryIconColor(kind);
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Text('Add Custom Category'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: liveColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: liveColor.withValues(alpha: 0.25)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: liveColor.withValues(alpha: 0.2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(liveIcon, color: liveColor, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Generated Icon',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: liveColor,
+                                  ),
+                                ),
+                                Text(
+                                  nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Category Name *',
+                        hintText: 'e.g. Groceries, Fuel, Netflix',
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: groupCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Subcategory / Group',
+                        hintText: 'e.g. Food & Dining, Travel, Bills',
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: kind,
+                      decoration: const InputDecoration(labelText: 'Type'),
+                      items: const [
+                        DropdownMenuItem(value: 'spending', child: Text('Expense')),
+                        DropdownMenuItem(value: 'income', child: Text('Income')),
+                        DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
+                        DropdownMenuItem(value: 'protection', child: Text('Protection')),
+                        DropdownMenuItem(value: 'saving', child: Text('Saving')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setState(() => kind = v);
+                      },
+                    ),
+                    if (kind == 'spending') ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: needOrWant,
+                        decoration: const InputDecoration(labelText: 'Need / Want'),
+                        items: const [
+                          DropdownMenuItem(value: 'need', child: Text('Need')),
+                          DropdownMenuItem(value: 'want', child: Text('Want')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setState(() => needOrWant = v);
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+              ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -457,6 +676,7 @@ class SettingsScreen extends ConsumerWidget {
                 FilledButton(
                   onPressed: () async {
                     final name = nameCtrl.text.trim();
+                    final group = groupCtrl.text.trim();
                     if (name.isEmpty) return;
 
                     final db = ref.read(appDatabaseProvider);
@@ -470,6 +690,7 @@ class SettingsScreen extends ConsumerWidget {
                         id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
                         householdId: householdId,
                         kind: kind,
+                        groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
                         name: name,
                         needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
                         isDeduction: const Value(false),
@@ -477,6 +698,8 @@ class SettingsScreen extends ConsumerWidget {
                         sortOrder: const Value(100),
                       )
                     ]);
+
+                    ref.read(syncServiceProvider).triggerSync();
 
                     if (context.mounted) {
                       Navigator.pop(context); // Close add category dialog
@@ -626,7 +849,82 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
   }
+
+  void _showTimezonePicker(BuildContext context, WidgetRef ref, String currentId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) {
+        final cs = Theme.of(context).colorScheme;
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          maxChildSize: 0.92,
+          minChildSize: 0.4,
+          expand: false,
+          builder: (_, ctrl) => Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Icon(Icons.schedule_outlined, color: cs.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Select Timezone',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  controller: ctrl,
+                  itemCount: kTimezones.length,
+                  itemBuilder: (_, i) {
+                    final tz = kTimezones[i];
+                    final isSelected = tz.id == currentId;
+                    return ListTile(
+                      title: Text(
+                        tz.label,
+                        style: TextStyle(
+                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                          color: isSelected ? cs.primary : cs.onSurface,
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? Icon(Icons.check_circle_rounded, color: cs.primary)
+                          : null,
+                      onTap: () {
+                        ref.read(selectedTimezoneIdProvider.notifier).state = tz.id;
+                        ref.read(timezoneOffsetProvider.notifier).state = tz.offsetMinutes;
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
+
 
 class _SettingsTile extends StatelessWidget {
   final IconData icon;

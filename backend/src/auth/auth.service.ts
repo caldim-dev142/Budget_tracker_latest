@@ -52,7 +52,9 @@ export class AuthService {
         },
       });
 
-      await this.seedCategoriesForHousehold(householdId);
+      await this.ensureHouseholdAndDefaults(userId, householdId, displayName);
+    } else if (user.household_id) {
+      await this.ensureHouseholdAndDefaults(user.id, user.household_id, user.displayName);
     }
 
     const tokens = await this.issueTokens(user.id, user.household_id ?? '');
@@ -92,7 +94,7 @@ export class AuthService {
       },
     });
 
-    await this.seedCategoriesForHousehold(householdId);
+    await this.ensureHouseholdAndDefaults(userId, householdId, dto.displayName);
 
     const tokens = await this.issueTokens(user.id, householdId);
     return {
@@ -117,6 +119,10 @@ export class AuthService {
 
     const valid = await argon2.verify(user.password, dto.password);
     if (!valid) throw new UnauthorizedException('Invalid credentials.');
+
+    if (user.household_id) {
+      await this.ensureHouseholdAndDefaults(user.id, user.household_id, user.displayName);
+    }
 
     const tokens = await this.issueTokens(user.id, user.household_id ?? '');
     return {
@@ -157,6 +163,38 @@ export class AuthService {
       refreshToken: rawRefresh,
       refreshTokenFamily: tokenFamily,
     };
+  }
+
+  async ensureHouseholdAndDefaults(userId: string, householdId: string, displayName: string) {
+    try {
+      await this.prisma.household.upsert({
+        where: { id: householdId },
+        create: {
+          id: householdId,
+          name: `${displayName}'s Household`,
+          ownerId: userId,
+        },
+        update: {},
+      });
+
+      await this.seedCategoriesForHousehold(householdId);
+      await this.seedDefaultAccountsForHousehold(householdId);
+    } catch (e) {
+      console.error('Failed to ensure household and defaults:', e);
+    }
+  }
+
+  async seedDefaultAccountsForHousehold(householdId: string) {
+    // Remove any stale default accounts seeded by older app versions.
+    // Accounts are now created explicitly by the user only.
+    try {
+      await this.prisma.account.deleteMany({
+        where: {
+          householdId,
+          name: { in: ['Savings Account', 'Cash Wallet'] },
+        },
+      });
+    } catch (_) {}
   }
 
   private async seedCategoriesForHousehold(householdId: string) {

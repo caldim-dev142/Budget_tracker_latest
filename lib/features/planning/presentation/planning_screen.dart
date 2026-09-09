@@ -8,6 +8,7 @@ import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../data/local/database.dart';
+import '../../../core/services/sync_service.dart';
 import '../../auth/providers/auth_providers.dart';
 
 const _uuid = Uuid();
@@ -1083,6 +1084,7 @@ class _ReceivablesTab extends ConsumerWidget {
                   dueDate: dueDate,
                   existingEntryId: rec.entryId,
                 );
+                ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
@@ -1107,6 +1109,7 @@ class _ReceivablesTab extends ConsumerWidget {
       WidgetRef ref, ReceivablesTableData rec) async {
     final db = ref.read(appDatabaseProvider);
     await db.borrowLendDao.settleReceivable(rec.id);
+    ref.read(syncServiceProvider).triggerSync();
   }
 
   Future<void> _deleteReceivable(

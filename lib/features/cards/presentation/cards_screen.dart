@@ -8,6 +8,7 @@ import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../data/local/database.dart';
+import '../../../core/services/sync_service.dart';
 import '../../auth/providers/auth_providers.dart';
 
 const _uuid = Uuid();
@@ -177,6 +178,7 @@ class CardsScreen extends ConsumerWidget {
                   isActive: const Value(true),
                 ),
               );
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) {
                 Navigator.pop(context);
@@ -249,6 +251,7 @@ class CardsScreen extends ConsumerWidget {
                     name: Value(name),
                     previousOutstandingPaise: Value(outstanding),
                   ));
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) {
                 Navigator.pop(context);
@@ -323,6 +326,7 @@ class CardsScreen extends ConsumerWidget {
                   amountPaise: -amountPaise,
                 ),
               );
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) {
                 Navigator.pop(context);
@@ -380,6 +384,7 @@ class CardsScreen extends ConsumerWidget {
       await (db.update(db.creditCardsTable)
             ..where((c) => c.id.equals(card.id)))
           .write(const CreditCardsTableCompanion(isActive: Value(false)));
+      ref.read(syncServiceProvider).triggerSync();
     }
   }
 }
@@ -644,6 +649,7 @@ class _CardTransactionsSheet extends ConsumerWidget {
                                     .write(CreditCardsTableCompanion(
                                   previousOutstandingPaise: Value(newBal),
                                 ));
+                                ref.read(syncServiceProvider).triggerSync();
                               }
                             },
                           ),
@@ -708,6 +714,7 @@ class _CardTransactionsSheet extends ConsumerWidget {
                   .write(CreditCardsTableCompanion(
                 previousOutstandingPaise: Value(newBal),
               ));
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) Navigator.pop(context);
             },

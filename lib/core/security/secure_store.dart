@@ -53,12 +53,40 @@ class SecureStore {
 
   // ── Generic key-value helpers ────────────────────────────────────────────────
   /// Read any arbitrary key from secure storage.
-  static Future<String?> read(String key) => _storage.read(key: key);
+  static Future<String?> read(String key) async {
+    try {
+      return await _storage.read(key: key);
+    } catch (_) {
+      try {
+        const fallback = FlutterSecureStorage();
+        return await fallback.read(key: key);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
 
   /// Write any arbitrary key-value pair to secure storage.
-  static Future<void> write(String key, String value) =>
-      _storage.write(key: key, value: value);
+  static Future<void> write(String key, String value) async {
+    try {
+      await _storage.write(key: key, value: value);
+    } catch (_) {
+      try {
+        const fallback = FlutterSecureStorage();
+        await fallback.write(key: key, value: value);
+      } catch (_) {}
+    }
+  }
 
   /// Delete any arbitrary key from secure storage.
-  static Future<void> delete(String key) => _storage.delete(key: key);
+  static Future<void> delete(String key) async {
+    try {
+      await _storage.delete(key: key);
+    } catch (_) {
+      try {
+        const fallback = FlutterSecureStorage();
+        await fallback.delete(key: key);
+      } catch (_) {}
+    }
+  }
 }

@@ -23,19 +23,25 @@ async function bootstrap() {
     }),
   );
 
-  // Security headers
+  // Security headers and Content-Type handling
   const fastifyInstance = app.getHttpAdapter().getInstance();
+
   fastifyInstance.addHook('onRequest', (request: any, reply: any, done: () => void) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'SAMEORIGIN');
     reply.header('X-XSS-Protection', '1; mode=block');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+    // Default missing content-type on requests so Fastify doesn't reject with 415 Unsupported Media Type: undefined
+    if (!request.headers['content-type']) {
+      request.headers['content-type'] = 'application/json';
+    }
     done();
   });
 
-  // CORS
+  // CORS - allow mobile apps and web clients
   app.enableCors({
-    origin: process.env.CORS_ORIGINS?.split(',') ?? ['http://localhost:3000'],
+    origin: true,
     credentials: true,
   });
 

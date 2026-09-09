@@ -8,6 +8,7 @@ import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../data/local/database.dart';
+import '../../../core/services/sync_service.dart';
 import '../../auth/providers/auth_providers.dart';
 
 const _uuid = Uuid();
@@ -205,6 +206,8 @@ class ProtectionScreen extends ConsumerWidget {
                 ]);
               }
 
+              ref.read(syncServiceProvider).triggerSync();
+
               if (context.mounted) {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -275,6 +278,7 @@ class ProtectionScreen extends ConsumerWidget {
                     name: Value(name),
                     openingReservePaise: Value(reserve),
                   ));
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) {
                 Navigator.pop(context);
@@ -560,6 +564,7 @@ class _SinkingFundCard extends ConsumerWidget {
       final db = ref.read(appDatabaseProvider);
       await (db.update(db.sinkingFundsTable)..where((f) => f.id.equals(fund.id)))
           .write(SinkingFundsTableCompanion(archivedAt: Value(DateTime.now())));
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

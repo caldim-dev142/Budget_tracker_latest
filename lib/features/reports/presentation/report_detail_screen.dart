@@ -47,6 +47,13 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
   double _spendingPlanPct = 45.0;
   double _savingPlanPct = 35.0;
   double _protectionPlanPct = 20.0;
+  double _initialSpendingBudgetPct = 45.0;
+  double _initialSavingBudgetPct = 35.0;
+  double _initialProtectionBudgetPct = 20.0;
+  bool _spendingLocked = false;
+  bool _savingLocked = false;
+  bool _protectionLocked = false;
+  bool _planCustomizerExpanded = false;
 
   // 4. cash_flow data
   late List<double> _cashFlowIn;
@@ -212,14 +219,17 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       }
       final totalBudget = spendingBudget + protectionBudget + savingBudget;
       if (totalBudget > 0) {
-        _spendingPlanPct = (spendingBudget / totalBudget) * 100;
-        _savingPlanPct = (savingBudget / totalBudget) * 100;
-        _protectionPlanPct = (protectionBudget / totalBudget) * 100;
+        _spendingPlanPct = ((spendingBudget / totalBudget) * 100).roundToDouble();
+        _savingPlanPct = ((savingBudget / totalBudget) * 100).roundToDouble();
+        _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
       } else {
         _spendingPlanPct = 45.0;
         _savingPlanPct = 35.0;
         _protectionPlanPct = 20.0;
       }
+      _initialSpendingBudgetPct = _spendingPlanPct;
+      _initialSavingBudgetPct = _savingPlanPct;
+      _initialProtectionBudgetPct = _protectionPlanPct;
 
       // 4. Cash Flow: Inflow vs Outflow for the last 6 months
       _cashFlowIn = [];
@@ -1184,6 +1194,144 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
     );
   }
 
+  // ── Plan Pct adjuster (Strict 100% total, lock-aware, user-friendly) ──────
+  void _adjustPlanPct(String layer, double newPct) {
+    setState(() {
+      final target = newPct.roundToDouble().clamp(0.0, 100.0);
+
+      if (layer == 'spending') {
+        if (_spendingLocked) return;
+        if (_savingLocked && _protectionLocked) return;
+
+        if (_savingLocked) {
+          final maxAllowed = (100.0 - _savingPlanPct).clamp(0.0, 100.0);
+          _spendingPlanPct = target.clamp(0.0, maxAllowed);
+          _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
+        } else if (_protectionLocked) {
+          final maxAllowed = (100.0 - _protectionPlanPct).clamp(0.0, 100.0);
+          _spendingPlanPct = target.clamp(0.0, maxAllowed);
+          _savingPlanPct = (100.0 - _spendingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+        } else {
+          final oldVal = _spendingPlanPct;
+          _spendingPlanPct = target;
+          final delta = target - oldVal;
+
+          final othersTotal = _savingPlanPct + _protectionPlanPct;
+          if (othersTotal > 0) {
+            final saveRatio = _savingPlanPct / othersTotal;
+            _savingPlanPct = (_savingPlanPct - (delta * saveRatio)).roundToDouble().clamp(0.0, 100.0 - _spendingPlanPct);
+            _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
+            _savingPlanPct = (100.0 - _spendingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+          } else {
+            _savingPlanPct = ((100.0 - _spendingPlanPct) / 2).roundToDouble();
+            _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
+          }
+        }
+      } else if (layer == 'saving') {
+        if (_savingLocked) return;
+        if (_spendingLocked && _protectionLocked) return;
+
+        if (_spendingLocked) {
+          final maxAllowed = (100.0 - _spendingPlanPct).clamp(0.0, 100.0);
+          _savingPlanPct = target.clamp(0.0, maxAllowed);
+          _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
+        } else if (_protectionLocked) {
+          final maxAllowed = (100.0 - _protectionPlanPct).clamp(0.0, 100.0);
+          _savingPlanPct = target.clamp(0.0, maxAllowed);
+          _spendingPlanPct = (100.0 - _savingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+        } else {
+          final oldVal = _savingPlanPct;
+          _savingPlanPct = target;
+          final delta = target - oldVal;
+
+          final othersTotal = _spendingPlanPct + _protectionPlanPct;
+          if (othersTotal > 0) {
+            final spendRatio = _spendingPlanPct / othersTotal;
+            _spendingPlanPct = (_spendingPlanPct - (delta * spendRatio)).roundToDouble().clamp(0.0, 100.0 - _savingPlanPct);
+            _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
+            _spendingPlanPct = (100.0 - _savingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+          } else {
+            _spendingPlanPct = ((100.0 - _savingPlanPct) / 2).roundToDouble();
+            _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
+          }
+        }
+      } else {
+        // protection
+        if (_protectionLocked) return;
+        if (_spendingLocked && _savingLocked) return;
+
+        if (_spendingLocked) {
+          final maxAllowed = (100.0 - _spendingPlanPct).clamp(0.0, 100.0);
+          _protectionPlanPct = target.clamp(0.0, maxAllowed);
+          _savingPlanPct = (100.0 - _spendingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+        } else if (_savingLocked) {
+          final maxAllowed = (100.0 - _savingPlanPct).clamp(0.0, 100.0);
+          _protectionPlanPct = target.clamp(0.0, maxAllowed);
+          _spendingPlanPct = (100.0 - _savingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+        } else {
+          final oldVal = _protectionPlanPct;
+          _protectionPlanPct = target;
+          final delta = target - oldVal;
+
+          final othersTotal = _spendingPlanPct + _savingPlanPct;
+          if (othersTotal > 0) {
+            final spendRatio = _spendingPlanPct / othersTotal;
+            _spendingPlanPct = (_spendingPlanPct - (delta * spendRatio)).roundToDouble().clamp(0.0, 100.0 - _protectionPlanPct);
+            _savingPlanPct = (100.0 - _spendingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+            _spendingPlanPct = (100.0 - _savingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+          } else {
+            _spendingPlanPct = ((100.0 - _protectionPlanPct) / 2).roundToDouble();
+            _savingPlanPct = (100.0 - _spendingPlanPct - _protectionPlanPct).clamp(0.0, 100.0);
+          }
+        }
+      }
+    });
+  }
+
+  void _setPlanPreset(double spend, double save, double protect) {
+    setState(() {
+      _spendingLocked = false;
+      _savingLocked = false;
+      _protectionLocked = false;
+      _spendingPlanPct = spend;
+      _savingPlanPct = save;
+      _protectionPlanPct = protect;
+    });
+  }
+
+  void _promptDirectPct(String layer, String label, double currentVal) {
+    final ctrl = TextEditingController(text: currentVal.toStringAsFixed(0));
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Set $label Target %'),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Target Percentage',
+            suffixText: '%',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final val = double.tryParse(ctrl.text.trim());
+              if (val != null) {
+                _adjustPlanPct(layer, val);
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // 3. CASHFLOW DISTRIBUTION REPORT (PLAN VS ACTUAL)
   Widget _buildNeedsWantsReport(BuildContext context, ColorScheme cs) {
     if (_segmentedIndex == 1) {
@@ -1192,6 +1340,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Main dual-pie chart card ─────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
@@ -1220,21 +1369,21 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                               centerSpaceRadius: 24,
                               sections: [
                                 PieChartSectionData(
-                                  color: const Color(0xFFEF4444), // Red: Spending
+                                  color: const Color(0xFFEF4444),
                                   value: _spendingPlanPct,
                                   title: '${_spendingPlanPct.toStringAsFixed(0)}%',
                                   radius: 30,
                                   titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 PieChartSectionData(
-                                  color: const Color(0xFF10B981), // Green: Saving
+                                  color: const Color(0xFF10B981),
                                   value: _savingPlanPct,
                                   title: '${_savingPlanPct.toStringAsFixed(0)}%',
                                   radius: 30,
                                   titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 PieChartSectionData(
-                                  color: const Color(0xFFF59E0B), // Yellow: Protection
+                                  color: const Color(0xFFF59E0B),
                                   value: _protectionPlanPct,
                                   title: '${_protectionPlanPct.toStringAsFixed(0)}%',
                                   radius: 30,
@@ -1269,21 +1418,21 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                               centerSpaceRadius: 24,
                               sections: [
                                 PieChartSectionData(
-                                  color: const Color(0xFFEF4444), // Red: Spending
+                                  color: const Color(0xFFEF4444),
                                   value: _spendingActualPct,
                                   title: '${_spendingActualPct.toStringAsFixed(0)}%',
                                   radius: 30,
                                   titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 PieChartSectionData(
-                                  color: const Color(0xFF10B981), // Green: Saving
+                                  color: const Color(0xFF10B981),
                                   value: _savingActualPct,
                                   title: '${_savingActualPct.toStringAsFixed(0)}%',
                                   radius: 30,
                                   titleStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 PieChartSectionData(
-                                  color: const Color(0xFFF59E0B), // Yellow: Protection
+                                  color: const Color(0xFFF59E0B),
                                   value: _protectionActualPct,
                                   title: '${_protectionActualPct.toStringAsFixed(0)}%',
                                   radius: 30,
@@ -1299,9 +1448,9 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              Row(
+              const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
+                children: [
                   _DotLegendItem(color: Color(0xFFEF4444), label: 'Spending'),
                   SizedBox(width: 16),
                   _DotLegendItem(color: Color(0xFF10B981), label: 'Saving'),
@@ -1312,6 +1461,191 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
             ],
           ),
         ),
+
+        // ── Customize Plan button ─────────────────────────────────────────────
+        const SizedBox(height: 12),
+        GestureDetector(
+          onTap: () => setState(() => _planCustomizerExpanded = !_planCustomizerExpanded),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: cs.primary.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.tune_rounded, size: 18, color: cs.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Customize Plan Distribution',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: cs.primary,
+                    ),
+                  ),
+                ),
+                Icon(
+                  _planCustomizerExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  size: 20,
+                  color: cs.primary,
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Sliders & Presets (expanded) ──────────────────────────────────────
+        if (_planCustomizerExpanded) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Target Split (Must total 100%)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurfaceVariant),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF10B981)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Total: ${(_spendingPlanPct + _savingPlanPct + _protectionPlanPct).round()}%',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF10B981)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Presets
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.flash_on_rounded, size: 14),
+                        label: const Text('50/30/20', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _setPlanPreset(50, 30, 20),
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        label: const Text('60/20/20', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _setPlanPreset(60, 20, 20),
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        label: const Text('70/20/10', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _setPlanPreset(70, 20, 10),
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        label: const Text('40/40/20', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _setPlanPreset(40, 40, 20),
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        avatar: const Icon(Icons.restart_alt_rounded, size: 14),
+                        label: const Text('Reset', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => _setPlanPreset(
+                          _initialSpendingBudgetPct,
+                          _initialSavingBudgetPct,
+                          _initialProtectionBudgetPct,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Spending slider
+                _PlanSlider(
+                  label: 'Spending',
+                  color: const Color(0xFFEF4444),
+                  value: _spendingPlanPct,
+                  isLocked: _spendingLocked,
+                  onLockToggle: () => setState(() => _spendingLocked = !_spendingLocked),
+                  onStep: (delta) => _adjustPlanPct('spending', _spendingPlanPct + delta),
+                  onDirectInput: () => _promptDirectPct('spending', 'Spending', _spendingPlanPct),
+                  onChanged: (v) => _adjustPlanPct('spending', v),
+                ),
+
+                // Saving slider
+                _PlanSlider(
+                  label: 'Saving',
+                  color: const Color(0xFF10B981),
+                  value: _savingPlanPct,
+                  isLocked: _savingLocked,
+                  onLockToggle: () => setState(() => _savingLocked = !_savingLocked),
+                  onStep: (delta) => _adjustPlanPct('saving', _savingPlanPct + delta),
+                  onDirectInput: () => _promptDirectPct('saving', 'Saving', _savingPlanPct),
+                  onChanged: (v) => _adjustPlanPct('saving', v),
+                ),
+
+                // Protection slider
+                _PlanSlider(
+                  label: 'Protection',
+                  color: const Color(0xFFF59E0B),
+                  value: _protectionPlanPct,
+                  isLocked: _protectionLocked,
+                  onLockToggle: () => setState(() => _protectionLocked = !_protectionLocked),
+                  onStep: (delta) => _adjustPlanPct('protection', _protectionPlanPct + delta),
+                  onDirectInput: () => _promptDirectPct('protection', 'Protection', _protectionPlanPct),
+                  onChanged: (v) => _adjustPlanPct('protection', v),
+                ),
+
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 13, color: cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        'Tap 🔒 to lock a target percentage while adjusting other layers.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+
         const SizedBox(height: 24),
         Text('Allocation vs Actual Comparison', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
@@ -2114,6 +2448,157 @@ class _ComparisonRow extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+// ─── Plan Distribution Slider ─────────────────────────────────────────────────
+
+class _PlanSlider extends StatelessWidget {
+  final String label;
+  final Color color;
+  final double value;
+  final bool isLocked;
+  final VoidCallback onLockToggle;
+  final ValueChanged<int> onStep;
+  final VoidCallback onDirectInput;
+  final ValueChanged<double> onChanged;
+
+  const _PlanSlider({
+    required this.label,
+    required this.color,
+    required this.value,
+    required this.isLocked,
+    required this.onLockToggle,
+    required this.onStep,
+    required this.onDirectInput,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final intVal = value.round();
+    final effectiveColor = isLocked ? color.withValues(alpha: 0.6) : color;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isLocked ? cs.surfaceContainerHighest.withValues(alpha: 0.3) : color.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isLocked ? cs.outlineVariant.withValues(alpha: 0.5) : color.withValues(alpha: 0.18),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(color: effectiveColor, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: isLocked ? cs.onSurfaceVariant : cs.onSurface,
+                    ),
+                  ),
+                ),
+                // Lock toggle button
+                IconButton(
+                  tooltip: isLocked ? 'Unlock $label' : 'Lock $label',
+                  icon: Icon(
+                    isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                    size: 18,
+                    color: isLocked ? cs.primary : cs.onSurfaceVariant.withValues(alpha: 0.5),
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onPressed: onLockToggle,
+                ),
+                const SizedBox(width: 4),
+                // Decrement button
+                IconButton(
+                  tooltip: 'Decrease 1%',
+                  icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: isLocked ? cs.onSurfaceVariant.withValues(alpha: 0.3) : cs.onSurface,
+                  onPressed: isLocked ? null : () => onStep(-1),
+                ),
+                // Tappable percentage chip for direct input
+                GestureDetector(
+                  onTap: isLocked ? null : onDirectInput,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: effectiveColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: effectiveColor.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '$intVal%',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: effectiveColor,
+                          ),
+                        ),
+                        if (!isLocked) ...[
+                          const SizedBox(width: 3),
+                          Icon(Icons.edit_rounded, size: 11, color: effectiveColor.withValues(alpha: 0.7)),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                // Increment button
+                IconButton(
+                  tooltip: 'Increase 1%',
+                  icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: isLocked ? cs.onSurfaceVariant.withValues(alpha: 0.3) : cs.onSurface,
+                  onPressed: isLocked ? null : () => onStep(1),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: effectiveColor,
+                inactiveTrackColor: effectiveColor.withValues(alpha: 0.15),
+                thumbColor: effectiveColor,
+                overlayColor: effectiveColor.withValues(alpha: 0.12),
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              ),
+              child: Slider(
+                value: value.clamp(0.0, 100.0),
+                min: 0.0,
+                max: 100.0,
+                divisions: 100,
+                onChanged: isLocked ? null : onChanged,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
