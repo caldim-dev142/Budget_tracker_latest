@@ -105,9 +105,22 @@ The synchronization controller in [backend/src/sync/](file:///c:/Users/USER/Desk
 
 ---
 
-## 4. Household Multi-Tenancy & Security
+## 4. Household Multi-Tenancy & Management API
 
-Every financial entity (Account, Category, Entry, Budget, SinkingFund, SavingGoal, MonthSnapshot) is strictly partitioned by `household_id`.
+Every financial entity (Account, Category, Entry, Budget, SinkingFund, SavingGoal, MonthSnapshot, PlannedBill, Receivable) is strictly partitioned by `household_id`.
 
-- **JWT / Auth Guard**: Every request extracts the authenticated user's `householdId` from their validated token.
+### Household Endpoints (`/households`):
+- `POST /households`: Create a new household (assigning the creator as `owner_id`) and seed initial categories.
+- `POST /households/join`: Join an existing household using a shared `householdId`.
+- `GET /households/me`: Fetch the current user's active household metadata and all joined members.
+- `PATCH /households/me`: Update the household display name (Owner only).
+- `DELETE /households/me`: Delete the household and disassociate all members (Owner only).
+- `DELETE /households/members/:memberId`: Remove an individual member from the household (Owner only).
+
+### Security & Tenant Isolation:
+- **JWT / Auth Guard**: Every request extracts the authenticated user's `userId` and active `householdId` from their validated token.
 - **Tenant Isolation**: Prisma queries enforce `where: { householdId }` on every read and write operation, preventing cross-household data leakage.
+- **Dual Authentication Modes**:
+  - **Email / Password**: BCrypt / Salted hash authentication with standard JWT issuing.
+  - **Google Sign-In**: Firebase Admin SDK token verification with `serverClientId` validation for Android / iOS / Web clients.
+

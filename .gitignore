@@ -50,5 +50,10 @@ dist/
 .env
 *.env
 !.env.example
-.agents/
-
+# Android Keystore & Signing Secrets
+key.properties
+**/key.properties
+*.keystore
+**/*.keystore
+*.jks
+**/*.jks

@@ -12,7 +12,20 @@ import '../../../core/security/app_lock_service.dart';
 import '../../../core/services/app_init_service.dart';
 import '../../../core/services/sync_service.dart';
 
-final serverUrlProvider = StateProvider<String>((_) => 'http://192.168.1.166:3001');
+/// Production backend URL supplied at compile-time via --dart-define=BACKEND_URL=https://...
+const String kBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
+
+final serverUrlProvider = StateProvider<String>((_) {
+  if (kBackendUrl.isNotEmpty) {
+    return kBackendUrl;
+  }
+  if (kReleaseMode) {
+    // In production release builds, default to empty string so it doesn't leak developer LAN IP
+    return '';
+  }
+  // Default development fallback for Android emulator / local testing
+  return 'http://10.0.2.2:3000';
+});
 final tokenProvider = StateProvider<String?>((_) => null);
 
 enum AuthMode { authenticated, offline, guest }

@@ -100,6 +100,60 @@ export class EntriesService {
           categoryId = `${householdId}-${categoryId}`;
         }
 
+<<<<<<< HEAD
+        // Ensure category exists before inserting entry to avoid FK violation
+        if (categoryId) {
+          const catExists = await this.prisma.category.findUnique({ where: { id: categoryId } });
+          if (!catExists) {
+            await this.prisma.category.create({
+              data: {
+                id: categoryId,
+                householdId,
+                kind: dto.kind ?? 'spending',
+                name: dto.categoryId ?? 'Uncategorized',
+                sortOrder: 999,
+              },
+            }).catch(() => {});
+          }
+        }
+
+        const existing = await this.prisma.entry.findUnique({ where: { id: dto.id } });
+        if (existing) {
+          if (existing.householdId !== householdId) {
+            throw new ForbiddenException(`Access denied: Entry ${dto.id} belongs to a different household.`);
+          }
+          return this.prisma.entry.update({
+            where: { id: dto.id },
+            data: {
+              amountPaise: Math.round(Number(dto.amountPaise)),
+              note: dto.note ?? null,
+              updatedAt: new Date(dto.updatedAt ?? Date.now()),
+              deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
+              version: dto.version ?? (existing.version + 1),
+            },
+          });
+        } else {
+          return this.prisma.entry.create({
+            data: {
+              id: dto.id,
+              householdId,
+              categoryId: categoryId,
+              kind: dto.kind,
+              accountId: dto.accountId ?? null,
+              cardId: dto.cardId ?? null,
+              entryDate: new Date(dto.entryDate),
+              amountPaise: Math.round(Number(dto.amountPaise)),
+              note: dto.note ?? null,
+              parentId: dto.parentId ?? null,
+              createdBy: userId,
+              version: dto.version ?? 1,
+              createdAt: new Date(dto.createdAt ?? Date.now()),
+              updatedAt: new Date(dto.updatedAt ?? Date.now()),
+              deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
+            },
+          });
+        }
+=======
         return this.prisma.entry.upsert({
           where: { id: dto.id },
           create: {
@@ -128,6 +182,7 @@ export class EntriesService {
             version: dto.version ?? 1,
           },
         });
+>>>>>>> 283a0f6341f663f11cb2321f2cb226f57b45390c
       }),
     );
 

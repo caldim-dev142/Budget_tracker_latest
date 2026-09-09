@@ -6,6 +6,8 @@ import {
   closingReserve,
   closingBalance,
   groupTotal,
+  computeNetAdjustments,
+  rollupAdjustments,
 } from '../src/engine/engine';
 
 describe('TypeScript Calculation Engine - Parity Verification', () => {
@@ -90,5 +92,31 @@ describe('TypeScript Calculation Engine - Parity Verification', () => {
     const balance = closingBalance(Number(input.totalAvailable), Number(input.reservesAtClose));
 
     expect(balance).toBe(Number(expected.closingBalance));
+  });
+
+  describe('Adjustment Parity Tests (Phase 2)', () => {
+    it('Case A — Positive adjustment: Income-style adjustment +1000 paise', () => {
+      const entries = [{ amount: 1000, isDeduction: false }];
+      const net = rollupAdjustments(entries);
+      expect(net).toBe(1000);
+      expect(computeNetAdjustments(1000, 0)).toBe(1000);
+    });
+
+    it('Case B — Deduction adjustment: Lending adjustment -1000 paise', () => {
+      const entries = [{ amount: 1000, isDeduction: true }];
+      const net = rollupAdjustments(entries);
+      expect(net).toBe(-1000);
+      expect(computeNetAdjustments(0, 1000)).toBe(-1000);
+    });
+
+    it('Case C — Mixed adjustments: +5000, -2000, +1000 = +4000 paise', () => {
+      const entries = [
+        { amount: 5000, isDeduction: false },
+        { amount: 2000, isDeduction: true },
+        { amount: 1000, isDeduction: false },
+      ];
+      const net = rollupAdjustments(entries);
+      expect(net).toBe(4000);
+    });
   });
 });

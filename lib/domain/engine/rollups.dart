@@ -1,6 +1,7 @@
 import '../../core/utils/money.dart';
 import '../../core/utils/month.dart';
 import '../entities/entry.dart';
+import '../entities/category.dart';
 
 /// Roll-up calculations that mirror the Excel matrix formulas (doc 01 §1).
 ///
@@ -89,13 +90,31 @@ class RollupEngine {
 
   /// Net adjustments = inflows − outflows (doc 01 §2.2).
   /// Signed: returns negative if outflows > inflows (e.g. lending more than borrowing).
-  static Money netAdjustments(YearMonth ym, List<Entry> entries) {
+  ///
+  /// Inflow adjustment categories (add): Credit Card Borrow/Payment, Borrow/Return, Temporary In/Out, Other Inflows
+  /// Outflow adjustment categories (subtract when isDeduction is true): Lending/Return(-), Other Outflows
+  static Money netAdjustments(
+    YearMonth ym,
+    List<Entry> entries, {
+    Map<String, Category>? categoryMap,
+    bool Function(String categoryId)? isDeductionLookup,
+    Set<String>? deductionCategoryIds,
+  }) {
     return entries
         .where((e) =>
             e.kind == EntryKind.adjustment &&
             e.yearMonth == ym &&
             e.deletedAt == null)
-        .fold(Money.zero, (s, e) => s + e.amount);
+        .fold(Money.zero, (s, e) {
+          final isDeduction = isDeductionLookup != null
+              ? isDeductionLookup(e.categoryId)
+              : (deductionCategoryIds != null
+                  ? deductionCategoryIds.contains(e.categoryId)
+                  : (categoryMap != null
+                      ? (categoryMap[e.categoryId]?.isDeduction ?? false)
+                      : false));
+          return isDeduction ? s - e.amount : s + e.amount;
+        });
   }
 
   /// Total spending = sum of all 7 spending groups (doc 01 §3).

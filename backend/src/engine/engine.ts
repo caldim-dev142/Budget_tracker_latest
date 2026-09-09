@@ -71,6 +71,28 @@ export function computeNetIncome(
 }
 
 /**
+ * Net adjustments = inflows − deductions/outflows (doc 01 §2.2).
+ */
+export function computeNetAdjustments(
+  inflows: number,
+  deductions: number,
+): number {
+  return inflows - deductions;
+}
+
+/**
+ * Rollup adjustments: sums positive inflows and subtracts deduction outflows.
+ */
+export function rollupAdjustments(
+  entries: Array<{ amount: number; isDeduction?: boolean }>,
+): number {
+  return entries.reduce(
+    (sum, e) => (e.isDeduction ? sum - e.amount : sum + e.amount),
+    0,
+  );
+}
+
+/**
  * Budget line computation (doc 01 §6).
  * difference = actual − budget
  * pctUsed = actual / budget (as number for UI, never stored)
