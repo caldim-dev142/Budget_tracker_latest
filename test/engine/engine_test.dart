@@ -10,6 +10,8 @@ import '../../lib/domain/engine/rollups.dart';
 import '../../lib/domain/engine/rollover.dart';
 import '../../lib/domain/engine/reserves.dart';
 import '../../lib/domain/entities/month_snapshot.dart';
+import '../../lib/domain/entities/entry.dart';
+import '../../lib/domain/entities/category.dart';
 
 void main() {
   // Load golden fixtures
@@ -226,6 +228,123 @@ void main() {
       final amounts = [100000, 200000, 300000, 400000, 500000];
       final total = amounts.fold(Money.zero, (s, v) => s + Money(v));
       expect(total.paise, equals(1500000));
+    });
+
+    group('netAdjustments sign logic', () {
+      final ym = YearMonth(2023, 11);
+      final catBorrow = const Category(
+        id: 'cat_borrow',
+        householdId: 'hh1',
+        kind: EntryKind.adjustment,
+        name: 'Borrow / Return',
+        isDeduction: false,
+      );
+      final catLending = const Category(
+        id: 'cat_lending',
+        householdId: 'hh1',
+        kind: EntryKind.adjustment,
+        name: 'Lending / Return',
+        isDeduction: true,
+      );
+      final catCcBorrow = const Category(
+        id: 'cat_cc_borrow',
+        householdId: 'hh1',
+        kind: EntryKind.adjustment,
+        name: 'Credit Card Borrow / Payment',
+        isDeduction: false,
+      );
+      final categoryMap = {
+        'cat_borrow': catBorrow,
+        'cat_lending': catLending,
+        'cat_cc_borrow': catCcBorrow,
+      };
+
+      test('Case A — Positive adjustment: Income-style adjustment +1000 paise', () {
+        final entries = [
+          Entry(
+            id: 'e1',
+            householdId: 'hh1',
+            categoryId: 'cat_borrow',
+            kind: EntryKind.adjustment,
+            entryDate: DateTime(2023, 11, 5),
+            amount: const Money(1000),
+            createdBy: 'u1',
+            createdAt: DateTime(2023, 11, 1),
+            updatedAt: DateTime(2023, 11, 1),
+          ),
+        ];
+
+        final net = RollupEngine.netAdjustments(ym, entries, categoryMap: categoryMap);
+        expect(net.paise, equals(1000));
+      });
+
+      test('Case B — Deduction adjustment: Lending adjustment -1000 paise', () {
+        final entries = [
+          Entry(
+            id: 'e2',
+            householdId: 'hh1',
+            categoryId: 'cat_lending',
+            kind: EntryKind.adjustment,
+            entryDate: DateTime(2023, 11, 6),
+            amount: const Money(1000),
+            createdBy: 'u1',
+            createdAt: DateTime(2023, 11, 1),
+            updatedAt: DateTime(2023, 11, 1),
+          ),
+        ];
+
+        final net = RollupEngine.netAdjustments(ym, entries, categoryMap: categoryMap);
+        expect(net.paise, equals(-1000));
+      });
+
+      test('Case C — Mixed adjustments: +5000, -2000, +1000 = +4000 paise', () {
+        final entries = [
+          Entry(
+            id: 'e3',
+            householdId: 'hh1',
+            categoryId: 'cat_borrow',
+            kind: EntryKind.adjustment,
+            entryDate: DateTime(2023, 11, 1),
+            amount: const Money(5000),
+            createdBy: 'u1',
+            createdAt: DateTime(2023, 11, 1),
+            updatedAt: DateTime(2023, 11, 1),
+          ),
+          Entry(
+            id: 'e4',
+            householdId: 'hh1',
+            categoryId: 'cat_lending',
+            kind: EntryKind.adjustment,
+            entryDate: DateTime(2023, 11, 2),
+            amount: const Money(2000),
+            createdBy: 'u1',
+            createdAt: DateTime(2023, 11, 1),
+            updatedAt: DateTime(2023, 11, 1),
+          ),
+          Entry(
+            id: 'e5',
+            householdId: 'hh1',
+            categoryId: 'cat_cc_borrow',
+            kind: EntryKind.adjustment,
+            entryDate: DateTime(2023, 11, 3),
+            amount: const Money(1000),
+            createdBy: 'u1',
+            createdAt: DateTime(2023, 11, 1),
+            updatedAt: DateTime(2023, 11, 1),
+          ),
+        ];
+
+        final net = RollupEngine.netAdjustments(ym, entries, categoryMap: categoryMap);
+        expect(net.paise, equals(4000));
+
+        // Also test using isDeductionLookup
+        final netLookup = RollupEngine.netAdjustments(
+          ym,
+          entries,
+          isDeductionLookup: (catId) => catId == 'cat_lending',
+        );
+        expect(netLookup.paise, equals(4000));
+      });
     });
   });
 

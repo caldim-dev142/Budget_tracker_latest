@@ -115,3 +115,12 @@ The application incorporates a custom design language:
 - **`MonthSwitcher`**: Horizontal gesture-driven month selector facilitating instant historical and forward navigation.
 - **`FluidMotion`**: Curated animation curves and duration tokens ensuring consistent micro-interactions across screen transitions and bottom sheets.
 - **`SkeletonLoader`**: Shimmer skeleton placeholder widgets for graceful loading states.
+
+---
+
+## 6. Household Management & Multi-User State
+
+- **[auth_providers.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/features/auth/providers/auth_providers.dart)**: Manages active user authentication session, token persistence (`flutter_secure_storage`), active household ID, and dynamic household switching.
+- **[settings_screen.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/features/settings/presentation/settings_screen.dart)**: Houses household management UI allowing users to view current household members, invite members via shareable Household IDs, create new households, or switch active households.
+- **Cross-Platform Icon Generator**: Automated asset pipeline in [scripts/generate_app_icons.py](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/scripts/generate_app_icons.py) that resizes the master SVG/PNG asset into all requisite iOS, Android (`mipmap-mdpi` to `xxxhdpi`), Windows (`.ico`), and Web icon sets.
+

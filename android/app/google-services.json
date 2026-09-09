@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:812371931220:android:39532a408dffd7e9647dc1",
         "android_client_info": {
-          "package_name": "com.example.budget_tracker"
+          "package_name": "com.caldim.budgettracker"
         }
       },
       "oauth_client": [
@@ -17,7 +17,7 @@
           "client_id": "812371931220-37l14hfs1nmluk88hs44v0bnl8rk6ir6.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.example.budget_tracker",
+            "package_name": "com.caldim.budgettracker",
             "certificate_hash": "26fb652f8818cf4dac7f22a0733b64b330a21ff3"
           }
         },

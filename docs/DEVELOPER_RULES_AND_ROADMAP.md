@@ -32,6 +32,7 @@ $$\text{Opening} + \text{Last Month Reserves} + \text{Income} + \text{Adjustment
 ## 2. Implementation & Handover Roadmap
 
 ### Phase 1: Critical Bug Fixes (P0)
+- [x] **Task 1.0 — 1:1 Integer Paise & Offline Sync Alignment**: Aligned backend Prisma schema, sync DTOs, and Drift SQLite models to standard 32/64-bit integer paise.
 - [ ] **Task 1.1 — Real Data in Reports**: Replace `_initMockData()` in `report_detail_screen.dart` with live Drift DAO / Riverpod queries matching the budget & transaction screens.
 - [ ] **Task 1.2 — Engine Adjustment Sign Fix**: Update `RollupEngine.netAdjustments()` in `rollups.dart` to respect the `isDeduction` category flag (matching `dashboard_providers.dart` and `account_dao.dart`).
 - [ ] **Task 1.3 — Plan-vs-Actual Reconciliation Insight**: Compute and surface `reconciliationDifference = remaining − closingBalance` at month-close as a diagnostic insight.
@@ -51,5 +52,5 @@ $$\text{Opening} + \text{Last Month Reserves} + \text{Income} + \text{Adjustment
 - [ ] **Task 3.2 — EMI-Aware Debt Commitments**: Dedicated loan/tenure tracking displaying debt-free milestone dates.
 - [ ] **Task 3.3 — Payment Method Tagging**: Add optional payment mode tags (UPI, Cash, Card, Bank Transfer) to entries and report breakdowns.
 - [ ] **Task 3.4 — Threshold Financial Insights**: Rule-based budget warnings and overspend notifications.
-- [ ] **Task 3.5 — Multi-User Household Invites**: Multi-device household sharing via backend `/households` endpoints.
+- [x] **Task 3.5 — Multi-User Household Invites**: Multi-device household sharing via backend `/households` endpoints and Flutter Settings screen.
 - [ ] **Task 3.6 — Split Large Screen Files**: Modularize `planning_screen.dart` (1,429 lines), `budget_screen.dart` (1,286 lines), and `dashboard_screen.dart` (1,033 lines) into sub-widgets.

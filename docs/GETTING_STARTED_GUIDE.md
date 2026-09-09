@@ -96,9 +96,21 @@ The server will start at `http://localhost:3000`.
 
 ---
 
-## 4. Setting Up Supabase (Alternative)
+## 4. App Branding & Asset Generation
+
+To regenerate launcher icons across Android (`mipmap-*`), iOS (`AppIcon.appiconset`), macOS, Windows (`.ico`), and Web from the master logo:
+
+```bash
+# Ensure Pillow is installed: pip install pillow
+python scripts/generate_app_icons.py
+```
+
+---
+
+## 5. Setting Up Supabase (Alternative)
 
 If you are using Supabase directly:
 1. Open the Supabase SQL Editor for your project.
 2. Copy and execute the contents of [supabase_schema.sql](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/supabase_schema.sql).
 3. Copy your project's PostgreSQL connection string and paste it into `backend/.env` under `DATABASE_URL`.
+

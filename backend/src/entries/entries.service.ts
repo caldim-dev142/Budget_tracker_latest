@@ -82,34 +82,42 @@ export class EntriesService {
           }
         }
 
-        return this.prisma.entry.upsert({
-          where: { id: dto.id },
-          create: {
-            id: dto.id,
-            householdId,
-            categoryId: categoryId,
-            kind: dto.kind,
-            accountId: dto.accountId ?? null,
-            cardId: dto.cardId ?? null,
-            entryDate: new Date(dto.entryDate),
-            amountPaise: Math.round(Number(dto.amountPaise)),
-            note: dto.note ?? null,
-            parentId: dto.parentId ?? null,
-            createdBy: userId,
-            version: dto.version ?? 1,
-            createdAt: new Date(dto.createdAt ?? Date.now()),
-            updatedAt: new Date(dto.updatedAt ?? Date.now()),
-            deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
-          },
-          update: {
-            // Last-write-wins: only update if incoming version > stored version (doc 11)
-            amountPaise: Math.round(Number(dto.amountPaise)),
-            note: dto.note ?? null,
-            updatedAt: new Date(dto.updatedAt ?? Date.now()),
-            deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
-            version: dto.version ?? 1,
-          },
-        });
+        const existing = await this.prisma.entry.findUnique({ where: { id: dto.id } });
+        if (existing) {
+          if (existing.householdId !== householdId) {
+            throw new ForbiddenException(`Access denied: Entry ${dto.id} belongs to a different household.`);
+          }
+          return this.prisma.entry.update({
+            where: { id: dto.id },
+            data: {
+              amountPaise: Math.round(Number(dto.amountPaise)),
+              note: dto.note ?? null,
+              updatedAt: new Date(dto.updatedAt ?? Date.now()),
+              deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
+              version: dto.version ?? (existing.version + 1),
+            },
+          });
+        } else {
+          return this.prisma.entry.create({
+            data: {
+              id: dto.id,
+              householdId,
+              categoryId: categoryId,
+              kind: dto.kind,
+              accountId: dto.accountId ?? null,
+              cardId: dto.cardId ?? null,
+              entryDate: new Date(dto.entryDate),
+              amountPaise: Math.round(Number(dto.amountPaise)),
+              note: dto.note ?? null,
+              parentId: dto.parentId ?? null,
+              createdBy: userId,
+              version: dto.version ?? 1,
+              createdAt: new Date(dto.createdAt ?? Date.now()),
+              updatedAt: new Date(dto.updatedAt ?? Date.now()),
+              deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
+            },
+          });
+        }
       }),
     );
 

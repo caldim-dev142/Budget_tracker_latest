@@ -28,7 +28,11 @@ class SyncService {
     final authState = _ref.read(authStateProvider).valueOrNull;
 
     if (authState == null || authState.authMode != AuthMode.authenticated) {
-      print('Offline mode: sync skipped.');
+      return;
+    }
+
+    final householdId = authState.householdId;
+    if (householdId == null || householdId.isEmpty || entry.householdId != householdId) {
       return;
     }
 
@@ -60,9 +64,7 @@ class SyncService {
           },
         ),
       );
-      print('Sync successful for entry ${entry.id}');
     } catch (e) {
-      print('Sync failed: $e. Enqueuing in offline queue.');
       try {
         final db = _ref.read(appDatabaseProvider);
         await db.syncQueueDao.enqueue(
@@ -72,6 +74,7 @@ class SyncService {
           entityId: entry.id,
           payload: {
             'id': entry.id,
+            'householdId': entry.householdId,
             'categoryId': entry.categoryId,
             'kind': entry.kind.name,
             'accountId': entry.accountId,
@@ -94,9 +97,11 @@ class SyncService {
     final authState = _ref.read(authStateProvider).valueOrNull;
 
     if (authState == null || authState.authMode != AuthMode.authenticated) {
-      print('Offline mode: sync all skipped.');
       return 0;
     }
+
+    final householdId = authState.householdId;
+    if (householdId == null || householdId.isEmpty) return 0;
 
     final token = authState.token;
     if (token == null) return 0;
@@ -110,6 +115,11 @@ class SyncService {
       if (op.entity == 'entry') {
         try {
           final payload = jsonDecode(op.payload);
+          // If payload contains householdId, verify it matches currently active household
+          if (payload is Map && payload.containsKey('householdId') && payload['householdId'] != householdId) {
+            continue; // Skip sync ops belonging to other households
+          }
+
           if (op.op == 'insert') {
             await _dio.post(
               '$serverUrl/entries/batch',
@@ -124,14 +134,14 @@ class SyncService {
           await db.syncQueueDao.markSynced(op.id);
           successCount++;
         } catch (e) {
-          print('Failed to sync op ${op.id}: $e');
+          // Retry later on reconnection
         }
       }
     }
 
-    // 2. Also ensure all local entries in entriesTable are pushed to backend (force sync)
+    // 2. Also ensure local entries for the active household in entriesTable are pushed to backend (force sync)
     try {
-      final allEntries = await (db.select(db.entriesTable)).get();
+      final allEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId))).get();
       if (allEntries.isNotEmpty) {
         final payloads = allEntries.map((e) => {
           'id': e.id,
@@ -157,11 +167,9 @@ class SyncService {
             },
           ),
         );
-        print('Force Sync: Synced ${allEntries.length} local entries to server.');
         return allEntries.length;
       }
     } catch (e) {
-      print('Error during full local entries sync: $e');
       rethrow;
     }
 

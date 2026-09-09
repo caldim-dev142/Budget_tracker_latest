@@ -2,9 +2,9 @@
 
 ## 1. Schema Overview
 
-The database contains **17 core tables** implemented in PostgreSQL (Supabase / Prisma) and mirrored in Drift SQLite for local offline storage.
+The database contains **18 core tables** implemented in PostgreSQL (Supabase / Prisma) and mirrored in Drift SQLite for local offline storage.
 
-All financial amounts are stored as **64-bit integer paise** (`INTEGER` or `BIGINT`).
+All financial amounts are strictly stored as **32-bit / 64-bit integer paise** (`INTEGER` / `Int`), ensuring 1:1 type compatibility and zero floating-point rounding errors across PostgreSQL, Drift SQLite, and Dart.
 
 ---
 
@@ -21,6 +21,9 @@ erDiagram
     HOUSEHOLDS ||--o{ SAVING_GOALS : "targets"
     HOUSEHOLDS ||--o{ CREDIT_CARDS : "manages"
     HOUSEHOLDS ||--o{ MONTH_SNAPSHOTS : "closes"
+    HOUSEHOLDS ||--o{ PLANNED_BILLS : "forecasts"
+    HOUSEHOLDS ||--o{ RECEIVABLES : "tracks"
+    HOUSEHOLDS ||--o{ ANNUAL_TARGETS : "sets"
     
     CATEGORIES ||--o{ BUDGETS : "budgeted_in"
     CATEGORIES ||--o{ ENTRIES : "categorizes"
@@ -36,21 +39,33 @@ erDiagram
 
 ## 3. Table-by-Table Reference
 
-### 1. `users`
-Stores user profile, authentication mapping, and household membership.
+### 1. `households`
+Multi-tenant isolation root for sharing budgets and ledger entries across household members.
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `TEXT` / `UUID` | PRIMARY KEY | Unique household ID |
+| `name` | `TEXT` | NOT NULL | Household name (e.g. "Sharma Family") |
+| `owner_id` | `TEXT` | NOT NULL | User ID of household owner / creator |
+| `created_at` | `TIMESTAMPTZ` | DEFAULT `NOW()` | Creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | DEFAULT `NOW()` | Modification timestamp |
+
+---
+
+### 2. `users`
+Stores user profile, authentication mapping, and active household membership.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `TEXT` / `UUID` | PRIMARY KEY | Unique user ID |
 | `email` | `TEXT` | NOT NULL, UNIQUE | User email address |
-| `password` | `TEXT` | NULLABLE | Salted SHA-256 password hash (or null if OAuth) |
+| `password` | `TEXT` | NULLABLE | Salted SHA-256 password hash (null for OAuth) |
 | `display_name` | `TEXT` | NOT NULL | User's full name |
-| `household_id` | `TEXT` | NOT NULL | Associated household partition |
+| `household_id` | `TEXT` | NULLABLE | Currently active household partition |
 | `auth_provider` | `TEXT` | DEFAULT `'email'` | `'email'`, `'google'`, or `'offline'` |
 | `created_at` | `TIMESTAMPTZ` | DEFAULT `NOW()` | Registration timestamp |
 
 ---
 
-### 2. `accounts`
+### 3. `accounts`
 Stores liquid cash and bank accounts.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -64,7 +79,7 @@ Stores liquid cash and bank accounts.
 
 ---
 
-### 3. `categories`
+### 4. `categories`
 Taxonomy of financial classifications (~141 seeded categories).
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -81,26 +96,26 @@ Taxonomy of financial classifications (~141 seeded categories).
 
 ---
 
-### 4. `budgets`
+### 5. `budgets`
 Monthly planned limits assigned per category.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `TEXT` | PRIMARY KEY | Unique budget ID |
 | `household_id` | `TEXT` | NOT NULL | Household key |
-| `category_id` | `TEXT` | FOREIGN KEY (`categories.id`) | Target category |
+| `category_id` | `TEXT` | FOREIGN KEY (`categories.id`) | Target category (Cascades on Delete) |
 | `year_month` | `TEXT` | NOT NULL | Year-month string, e.g. `'2026-09'` |
 | `amount_paise` | `INTEGER` | DEFAULT `0` | Budgeted limit in paise |
 | *Constraint* | `UNIQUE(category_id, year_month)` | UNIQUE constraint | One budget per category per month |
 
 ---
 
-### 5. `entries`
+### 6. `entries`
 The primary double-entry financial transaction ledger.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `TEXT` | PRIMARY KEY | Unique transaction ID |
 | `household_id` | `TEXT` | NOT NULL | Household key |
-| `category_id` | `TEXT` | FOREIGN KEY (`categories.id`) | Category assignment |
+| `category_id` | `TEXT` | FOREIGN KEY (`categories.id`) | Category assignment (Cascades on Delete) |
 | `kind` | `TEXT` | NOT NULL | `'income'`, `'expense'`, `'adjustment'`, `'transfer'` |
 | `account_id` | `TEXT` | NULLABLE | Originating bank/cash account |
 | `card_id` | `TEXT` | NULLABLE | Associated credit card |
@@ -116,28 +131,52 @@ The primary double-entry financial transaction ledger.
 
 ---
 
-### 6. `sinking_funds` & `fund_movements`
+### 7. `sinking_funds` & `fund_movements`
 Protection sinking funds (Layer 2) tracking cumulative reserves.
-- **`sinking_funds`**: `id`, `household_id`, `name`, `opening_reserve_paise`, `archived_at`.
-- **`fund_movements`**: `id`, `fund_id` (FK), `type` (`'inflow'`, `'outflow'`), `amount_paise`, `movement_date`, `note`.
+- **`sinking_funds`**: `id`, `household_id`, `name`, `opening_reserve_paise` (`INTEGER`), `archived_at`.
+- **`fund_movements`**: `id`, `fund_id` (FK to `sinking_funds`, CASCADE), `type` (`'inflow'`, `'outflow'`), `amount_paise` (`INTEGER`), `movement_date`, `note`.
 
 ---
 
-### 7. `saving_goals` & `goal_contributions`
+### 8. `saving_goals` & `goal_contributions`
 Goal-oriented savings (Layer 3).
-- **`saving_goals`**: `id`, `household_id`, `bucket` (`'retirement'`, `'children'`, `'custom'`), `name`, `target_paise`, `monthly_budget_paise`, `archived_at`.
-- **`goal_contributions`**: `id`, `goal_id` (FK), `amount_paise`, `contribution_date`, `note`.
+- **`saving_goals`**: `id`, `household_id`, `bucket` (`'retirement'`, `'children'`, `'custom'`), `name`, `target_paise` (`INTEGER`, nullable), `monthly_budget_paise` (`INTEGER`), `archived_at`.
+- **`goal_contributions`**: `id`, `goal_id` (FK to `saving_goals`, CASCADE), `amount_paise` (`INTEGER`), `contribution_date`, `note`.
 
 ---
 
-### 8. `credit_cards` & `card_transactions`
+### 9. `credit_cards` & `card_transactions`
 Credit card debt and monthly billing cycles.
-- **`credit_cards`**: `id`, `household_id`, `name`, `previous_outstanding_paise`, `is_active`.
-- **`card_transactions`**: `id`, `card_id` (FK), `txn_date`, `description`, `amount_paise`, `s_no`.
+- **`credit_cards`**: `id`, `household_id`, `name`, `previous_outstanding_paise` (`INTEGER`), `isActive` (`BOOLEAN`).
+- **`card_transactions`**: `id`, `card_id` (FK to `credit_cards`, CASCADE), `txn_date`, `description`, `amount_paise` (`INTEGER`), `s_no`.
 
 ---
 
-### 9. `month_snapshots`
+### 10. `receivables`
+Informal lending and receivables tracking.
+- `id` (`TEXT` PK), `household_id`, `person_name`, `amount_paise` (`INTEGER`), `status` (`'open'` / `'returned'`), `due_date`, `entry_id` (Nullable link to ledger entry).
+
+---
+
+### 11. `planned_bills`
+Forecasted forward commitments and recurring bills.
+- `id` (`TEXT` PK), `household_id`, `name`, `amount_paise` (`INTEGER`), `due_date`, `is_paid` (`BOOLEAN`), `entry_id` (Nullable link to ledger entry).
+
+---
+
+### 12. `reserve_lines`
+Custom month-specific reserve buffer allocations.
+- `id` (`TEXT` PK), `household_id`, `year_month`, `name`, `amount_paise` (`INTEGER`), `source` (`'manual'` / `'derived'`).
+
+---
+
+### 13. `annual_targets`
+High-level annual milestone targets.
+- `id` (`TEXT` PK), `household_id`, `title`, `target_paise` (`INTEGER`), `type` (DEFAULT `'income'`).
+
+---
+
+### 14. `month_snapshots`
 Sealed monthly financial statements capturing the exact state of the 7-layer waterfall.
 | Column | Type | Description |
 |---|---|---|
@@ -156,11 +195,12 @@ Sealed monthly financial statements capturing the exact state of the 7-layer wat
 | `remaining_paise` | `INTEGER` | Surplus = Inflow - Outflow |
 | `status` | `TEXT` | `'open'` or `'closed'` |
 | `closed_at` | `TIMESTAMPTZ` | Timestamp of month closure |
+| *Constraint* | `UNIQUE(household_id, year_month)` | Single snapshot per household per month |
 
 ---
 
-### 10. `sync_queue`
-Local SQLite table storing offline mutations waiting for cloud sync.
+### 15. `sync_queue`
+Local SQLite & server table storing mutations waiting for cloud synchronization.
 | Column | Type | Description |
 |---|---|---|
 | `id` | `TEXT` (PK) | Unique mutation ID |
