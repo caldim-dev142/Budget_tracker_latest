@@ -8,8 +8,12 @@ import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../domain/entities/entry.dart';
 import '../../../core/utils/money.dart';
+import '../../../core/utils/timezone_utils.dart';
 import '../../../data/local/database.dart';
+import '../../../core/services/sync_service.dart';
+import '../../../core/utils/category_icons.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
+import '../../settings/providers/settings_providers.dart';
 import '../providers/transactions_providers.dart';
 
 /// S4 — Transactions list (doc 09 S4).
@@ -138,6 +142,7 @@ class _EntriesList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ym = ref.watch(selectedMonthProvider);
     final search = ref.watch(searchQueryProvider).toLowerCase();
+    final tzOffset = ref.watch(timezoneOffsetProvider);
     final entriesAsync = ref.watch(entriesStreamProvider((ym, filter)));
     final catsAsync = ref.watch(_categoriesMapProvider);
     final cs = Theme.of(context).colorScheme;
@@ -218,15 +223,16 @@ class _EntriesList extends ConsumerWidget {
 
         // ── Build day-grouped list items ─────────────────────────────────────
         // Each item is either a String (date header) or an EntriesTableData (entry row).
-        final now = DateTime.now();
-        final today = DateTime(now.year, now.month, now.day);
+        final nowUtc = DateTime.now().toUtc();
+        final nowLocal = toTimezone(nowUtc, tzOffset);
+        final today = DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
         final yesterday = today.subtract(const Duration(days: 1));
 
         final List<dynamic> items = [];
         String? lastDateKey;
 
         for (final entry in filteredList) {
-          final d = entry.entryDate;
+          final d = toTimezone(entry.entryDate.toUtc(), tzOffset);
           final dateKey = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
           if (dateKey != lastDateKey) {
             lastDateKey = dateKey;
@@ -286,46 +292,27 @@ class _EntryTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
-    final isIncome = entry.kind == 'income';
-    final isAdjustment = entry.kind == 'adjustment';
+    final tzOffset = ref.watch(timezoneOffsetProvider);
     final amount = Money(entry.amountPaise);
 
-    Color badgeBg;
-    Color iconColor;
-    IconData iconData;
-    Color amountColor;
-
-    if (isIncome) {
-      badgeBg = const Color(0xFFE0F2F1);
-      iconColor = const Color(0xFF00897B);
-      iconData = Icons.arrow_upward_rounded;
-      amountColor = const Color(0xFF00A887);
-    } else if (isAdjustment) {
-      badgeBg = const Color(0xFFFFF3E0);
-      iconColor = const Color(0xFFFB8C00);
-      iconData = Icons.swap_vert_rounded;
-      amountColor = const Color(0xFFFB8C00);
-    } else if (entry.kind == 'saving') {
-      badgeBg = const Color(0xFFF3E5F5);
-      iconColor = const Color(0xFF8E24AA);
-      iconData = Icons.savings_outlined;
-      amountColor = const Color(0xFF8E24AA);
-    } else if (entry.kind == 'protection') {
-      badgeBg = const Color(0xFFE8EAF6);
-      iconColor = const Color(0xFF3F51B5);
-      iconData = Icons.shield_outlined;
-      amountColor = const Color(0xFF3F51B5);
-    } else {
-      badgeBg = const Color(0xFFFFEBEE); // Light red background for expense badge
-      iconColor = const Color(0xFFC62828); // Dark red icon for expense badge
-      iconData = Icons.arrow_downward_rounded;
-      amountColor = const Color(0xFFEF4444); // Red color for expense amount
-    }
-
+    final rawCatName = catMap[entry.categoryId] ?? '';
     final catName = (entry.note != null && entry.note!.isNotEmpty)
         ? entry.note!
-        : (catMap[entry.categoryId] ?? entry.categoryId);
-    final formattedDate = '${entry.entryDate.day}/${entry.entryDate.month}/${entry.entryDate.year}';
+        : (rawCatName.isNotEmpty ? rawCatName : entry.categoryId);
+
+    final iconColor = categoryIconColor(entry.kind);
+    final badgeBg = iconColor.withValues(alpha: 0.14);
+    final iconData = categoryIcon(rawCatName.isNotEmpty ? rawCatName : catName, entry.kind);
+
+    final Color amountColor = switch (entry.kind) {
+      'income' => const Color(0xFF00A887),
+      'adjustment' => const Color(0xFFFB8C00),
+      'saving' => const Color(0xFF10B981),
+      'protection' => const Color(0xFFF59E0B),
+      _ => const Color(0xFFEF4444),
+    };
+
+    final formattedDate = formatDateShort(entry.entryDate.toUtc(), tzOffset);
 
     return Dismissible(
       key: Key(entry.id),
@@ -363,6 +350,7 @@ class _EntryTile extends ConsumerWidget {
       onDismissed: (_) async {
         final db = ref.read(appDatabaseProvider);
         await db.entryDao.softDelete(entry.id);
+        ref.read(syncServiceProvider).triggerSync();
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

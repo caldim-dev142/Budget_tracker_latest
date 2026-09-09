@@ -34,6 +34,7 @@ export class CategoriesService {
 
     await this.prisma.category.createMany({
       data,
+      skipDuplicates: true,
     });
   }
 }

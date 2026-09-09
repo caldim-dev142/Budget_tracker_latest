@@ -9,8 +9,8 @@ import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../data/local/database.dart';
+import '../../../core/services/sync_service.dart';
 import '../../auth/providers/auth_providers.dart';
-import '../../transactions/providers/transactions_providers.dart';
 
 const _uuid = Uuid();
 
@@ -424,10 +424,11 @@ class AccountsScreen extends ConsumerWidget {
                 final db = ref.read(appDatabaseProvider);
                 final auth = ref.read(authStateProvider).valueOrNull;
                 final householdId = auth?.householdId ?? 'local';
+                final accountId = _uuid.v4();
 
                 await db.accountDao.upsertAccount(
                   AccountsTableCompanion.insert(
-                    id: _uuid.v4(),
+                    id: accountId,
                     householdId: householdId,
                     name: name,
                     type: type,
@@ -436,6 +437,34 @@ class AccountsScreen extends ConsumerWidget {
                     sortOrder: const Value(0),
                   ),
                 );
+
+                // If opening balance > 0, create an opening balance entry so it is never lost
+                if (balancePaise > 0) {
+                  final incomeCats = await (db.select(db.categoriesTable)
+                        ..where((c) => c.householdId.equals(householdId) & c.kind.equals('income'))
+                        ..limit(1))
+                      .get();
+                  final catId = incomeCats.isNotEmpty ? incomeCats.first.id : 'inc-05-$householdId';
+
+                  await db.entryDao.insertEntry(
+                    EntriesTableCompanion.insert(
+                      id: 'ob-$accountId',
+                      householdId: householdId,
+                      categoryId: catId,
+                      kind: 'income',
+                      accountId: Value(accountId),
+                      entryDate: DateTime.now(),
+                      amountPaise: balancePaise,
+                      note: Value('Opening Balance - $name'),
+                      createdBy: auth?.userId ?? 'user',
+                      createdAt: DateTime.now(),
+                      updatedAt: DateTime.now(),
+                    ),
+                  );
+                }
+
+                // Immediately trigger background sync so the account appears in PostgreSQL
+                ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
@@ -523,6 +552,8 @@ class AccountsScreen extends ConsumerWidget {
                       currentBalancePaise: Value(balancePaise),
                     ));
 
+                ref.read(syncServiceProvider).triggerSync();
+
                 if (context.mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -568,6 +599,7 @@ class AccountsScreen extends ConsumerWidget {
       await (db.update(db.accountsTable)
             ..where((a) => a.id.equals(account.id)))
           .write(const AccountsTableCompanion(isActive: Value(false)));
+      ref.read(syncServiceProvider).triggerSync();
     }
   }
 
@@ -698,7 +730,25 @@ final _activeAccountsProvider = StreamProvider<List<AccountsTableData>>((ref) {
   final db = ref.watch(appDatabaseProvider);
   final auth = ref.watch(authStateProvider).valueOrNull;
   final householdId = auth?.householdId ?? 'local';
-  return db.accountDao.watchActiveAccounts(householdId: householdId);
+  return db.accountDao.watchActiveAccounts(householdId: householdId).map((list) {
+    final seen = <String>{};
+    final deduped = <AccountsTableData>[];
+    // Sort so accounts with positive balance come first
+    final sorted = List<AccountsTableData>.from(list)
+      ..sort((a, b) {
+        if (a.currentBalancePaise != b.currentBalancePaise) {
+          return b.currentBalancePaise.compareTo(a.currentBalancePaise);
+        }
+        return a.sortOrder.compareTo(b.sortOrder);
+      });
+    for (final a in sorted) {
+      final key = a.name.trim().toLowerCase();
+      if (seen.add(key)) {
+        deduped.add(a);
+      }
+    }
+    return deduped;
+  });
 });
 
 final _accountEntriesProvider = StreamProvider.family<List<EntriesTableData>, String>((ref, accountId) {
@@ -806,6 +856,7 @@ extension on AccountsScreen {
                               onPressed: () async {
                                 final db = ref.read(appDatabaseProvider);
                                 await db.borrowLendDao.settleReceivable(item.id);
+                                ref.read(syncServiceProvider).triggerSync();
                               },
                             ),
                           ],
@@ -905,6 +956,7 @@ extension on AccountsScreen {
                               onPressed: () async {
                                 final db = ref.read(appDatabaseProvider);
                                 await db.borrowLendDao.settlePlannedBill(item.id);
+                                ref.read(syncServiceProvider).triggerSync();
                               },
                             ),
                           ],
@@ -973,6 +1025,7 @@ extension on AccountsScreen {
                 personName: name,
                 amountPaise: amountPaise,
               );
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) {
                 Navigator.pop(context);
@@ -1046,6 +1099,7 @@ extension on AccountsScreen {
                 name: name,
                 amountPaise: amountPaise,
               );
+              ref.read(syncServiceProvider).triggerSync();
 
               if (context.mounted) {
                 Navigator.pop(context);

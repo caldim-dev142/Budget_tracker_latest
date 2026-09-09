@@ -9,6 +9,7 @@ import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../data/local/database.dart';
 import '../../auth/providers/auth_providers.dart';
+import '../../../core/services/sync_service.dart';
 
 const _uuid = Uuid();
 
@@ -236,6 +237,8 @@ class SavingScreen extends ConsumerWidget {
                   ]);
                 }
 
+                ref.read(syncServiceProvider).triggerSync();
+
                 if (context.mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -340,6 +343,8 @@ class SavingScreen extends ConsumerWidget {
                           : Value(targetPaise),
                       monthlyBudgetPaise: Value(monthlyPaise),
                     ));
+
+                ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
@@ -610,6 +615,8 @@ class _GoalCard extends ConsumerWidget {
                 ),
               );
 
+              ref.read(syncServiceProvider).triggerSync();
+
               if (context.mounted) {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -654,6 +661,7 @@ class _GoalCard extends ConsumerWidget {
       await (db.update(db.savingGoalsTable)
             ..where((g) => g.id.equals(goal.id)))
           .write(SavingGoalsTableCompanion(archivedAt: Value(DateTime.now())));
+      ref.read(syncServiceProvider).triggerSync();
     }
   }
 
@@ -683,6 +691,7 @@ class _GoalCard extends ConsumerWidget {
       final db = ref.read(appDatabaseProvider);
       await (db.update(db.savingGoalsTable)..where((g) => g.id.equals(goal.id)))
           .write(SavingGoalsTableCompanion(archivedAt: Value(DateTime.now())));
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

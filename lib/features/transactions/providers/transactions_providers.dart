@@ -50,10 +50,9 @@ class AddEntryController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     final res = await _useCase.execute(draft);
     if (res.isSuccess) {
-      final entry = res.value;
       state = const AsyncValue.data(null);
-      // Trigger sync upload to Supabase DB via NestJS backend
-      _ref.read(syncServiceProvider).syncEntry(entry);
+      // Trigger full sync upload to backend PostgreSQL
+      _ref.read(syncServiceProvider).triggerSync();
       return true;
     } else {
       final fail = res.failure;
@@ -78,6 +77,7 @@ class AddEntryController extends StateNotifier<AsyncValue<void>> {
         ),
       );
       state = const AsyncValue.data(null);
+      _ref.read(syncServiceProvider).triggerSync();
       return true;
     } catch (e, st) {
       state = AsyncValue.error(e, st);

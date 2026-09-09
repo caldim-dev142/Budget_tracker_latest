@@ -49,8 +49,9 @@ export class HouseholdsService {
       data: { household_id: householdId },
     });
 
-    // Seed default categories for this newly created household
+    // Seed default categories and accounts for this newly created household
     await this.seedCategoriesForHousehold(householdId);
+    await this.seedDefaultAccountsForHousehold(householdId);
 
     const tokens = await this.authService.issueTokens(user.id, householdId);
 
@@ -349,6 +350,19 @@ export class HouseholdsService {
       await this.prisma.category.createMany({
         data,
         skipDuplicates: true,
+      });
+    } catch (_) {}
+  }
+
+  private async seedDefaultAccountsForHousehold(householdId: string) {
+    // Remove any stale default accounts seeded by older app versions.
+    // Accounts are now created explicitly by the user only.
+    try {
+      await this.prisma.account.deleteMany({
+        where: {
+          householdId,
+          name: { in: ['Savings Account', 'Cash Wallet'] },
+        },
       });
     } catch (_) {}
   }

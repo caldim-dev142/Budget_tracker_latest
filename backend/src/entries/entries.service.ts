@@ -58,28 +58,46 @@ export class EntriesService {
       }
     }
 
+    // Collect distinct category IDs needed by incoming entries
+    const neededCategories = new Map<string, { kind: string; name: string }>();
+    for (const dto of entries) {
+      let categoryId = dto.categoryId;
+      if (categoryId && !categoryId.startsWith(householdId) && !categoryId.startsWith('custom-')) {
+        categoryId = `${householdId}-${categoryId}`;
+      }
+      if (categoryId && !neededCategories.has(categoryId)) {
+        neededCategories.set(categoryId, {
+          kind: dto.kind ?? 'spending',
+          name: dto.categoryId ?? 'Uncategorized',
+        });
+      }
+    }
+
+    // Ensure all needed categories exist in DB using upsert (atomic and collision-free)
+    for (const [catId, info] of neededCategories.entries()) {
+      try {
+        await this.prisma.category.upsert({
+          where: { id: catId },
+          create: {
+            id: catId,
+            householdId,
+            kind: info.kind,
+            name: info.name,
+            sortOrder: 999,
+          },
+          update: {},
+        });
+      } catch (_) {
+        // Safe to ignore if already created
+      }
+    }
+
     const results = await Promise.allSettled(
       entries.map(async (dto) => {
         // Map categoryId to database format (householdId-categoryId) if needed
         let categoryId = dto.categoryId;
         if (categoryId && !categoryId.startsWith(householdId) && !categoryId.startsWith('custom-')) {
           categoryId = `${householdId}-${categoryId}`;
-        }
-
-        // Ensure category exists before inserting entry to avoid FK violation
-        if (categoryId) {
-          const catExists = await this.prisma.category.findUnique({ where: { id: categoryId } });
-          if (!catExists) {
-            await this.prisma.category.create({
-              data: {
-                id: categoryId,
-                householdId,
-                kind: dto.kind ?? 'spending',
-                name: dto.categoryId ?? 'Uncategorized',
-                sortOrder: 999,
-              },
-            }).catch(() => {});
-          }
         }
 
         return this.prisma.entry.upsert({

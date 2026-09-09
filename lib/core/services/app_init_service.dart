@@ -1,10 +1,6 @@
 import 'package:drift/drift.dart';
-import 'package:uuid/uuid.dart';
 import '../../core/constants/category_seed.dart';
 import '../../data/local/database.dart';
-import '../../core/utils/month.dart';
-
-const _uuid = Uuid();
 
 /// Seeds the database with initial category taxonomy and demo data on first launch.
 class AppInitService {
@@ -35,77 +31,73 @@ class AppInitService {
     await (db.update(db.categoriesTable)
           ..where((c) => c.name.equals('Lending/Return(-)') | c.name.equals('Others(Outflow)')))
         .write(const CategoriesTableCompanion(isDeduction: Value(true)));
-    // ── 2. Default Accounts (Zero Balance) ──────────────────────────────────
-    final accounts = await db.accountDao.getAllActive();
-    if (accounts.isEmpty) {
-      await db.accountDao.upsertAccount(
-        AccountsTableCompanion.insert(
-          id: 'acc-savings',
-          householdId: 'local',
-          name: 'Savings Account',
-          type: 'bank',
-          currentBalancePaise: const Value(0),
-          isActive: const Value(true),
-          sortOrder: const Value(1),
-        ),
-      );
-      await db.accountDao.upsertAccount(
-        AccountsTableCompanion.insert(
-          id: 'acc-cash',
-          householdId: 'local',
-          name: 'Cash Wallet',
-          type: 'cash',
-          currentBalancePaise: const Value(0),
-          isActive: const Value(true),
-          sortOrder: const Value(2),
-        ),
-      );
-    }
+    // (Default accounts seeding removed - user creates accounts explicitly)
   }
 
-  /// Clears any leftover dummy/demo data from previous app versions.
+  /// Clears only explicit demo-user dummy data (never deletes real user data).
   static Future<void> clearAllDummyData(AppDatabase db) async {
     try {
-      // Delete dummy entries
+      // Delete only explicit demo entries
       await (db.delete(db.entriesTable)
-            ..where((e) => e.createdBy.equals('demo-user') | e.householdId.equals('local')))
+            ..where((e) => e.createdBy.equals('demo-user')))
           .go();
 
-      // Reset default local account balances to zero
-      await (db.update(db.accountsTable)
-            ..where((a) => a.householdId.equals('local')))
-          .write(const AccountsTableCompanion(currentBalancePaise: Value(0)));
-
-      // Delete dummy sinking funds & goals with local householdId
-      await (db.delete(db.sinkingFundsTable)
-            ..where((f) => f.householdId.equals('local')))
-          .go();
-
-      await (db.delete(db.savingGoalsTable)
-            ..where((g) => g.householdId.equals('local')))
-          .go();
+      // Remove default empty accounts ('acc-savings%' or 'acc-cash%') if balance is 0 and no transactions exist
+      final defaultAccs = await (db.select(db.accountsTable)
+            ..where((a) => a.id.like('acc-savings%') | a.id.like('acc-cash%')))
+          .get();
+      for (final acc in defaultAccs) {
+        if (acc.currentBalancePaise == 0) {
+          final entriesCount = await (db.select(db.entriesTable)..where((e) => e.accountId.equals(acc.id))).get();
+          if (entriesCount.isEmpty) {
+            await (db.delete(db.accountsTable)..where((a) => a.id.equals(acc.id))).go();
+          }
+        }
+      }
     } catch (_) {}
   }
 
-  /// Ensures that default category taxonomy and accounts exist for an authenticated household.
-  static Future<void> ensureUserHouseholdSeed(AppDatabase db, String householdId) async {
+  /// Safely migrates any offline/local entities to the authenticated householdId
+  static Future<void> migrateLocalDataToHousehold(AppDatabase db, String householdId) async {
     if (householdId.isEmpty || householdId == 'local') return;
+    try {
+      await (db.update(db.accountsTable)..where((a) => a.householdId.equals('local')))
+          .write(AccountsTableCompanion(householdId: Value(householdId)));
+      await (db.update(db.entriesTable)..where((e) => e.householdId.equals('local')))
+          .write(EntriesTableCompanion(householdId: Value(householdId)));
+      await (db.update(db.creditCardsTable)..where((c) => c.householdId.equals('local')))
+          .write(CreditCardsTableCompanion(householdId: Value(householdId)));
+      await (db.update(db.plannedBillsTable)..where((b) => b.householdId.equals('local')))
+          .write(PlannedBillsTableCompanion(householdId: Value(householdId)));
+      await (db.update(db.receivablesTable)..where((r) => r.householdId.equals('local')))
+          .write(ReceivablesTableCompanion(householdId: Value(householdId)));
+      await (db.update(db.savingGoalsTable)..where((g) => g.householdId.equals('local')))
+          .write(SavingGoalsTableCompanion(householdId: Value(householdId)));
+      await (db.update(db.sinkingFundsTable)..where((f) => f.householdId.equals('local')))
+          .write(SinkingFundsTableCompanion(householdId: Value(householdId)));
+      await db.accountDao.ensureOpeningBalanceEntries(householdId);
+    } catch (_) {}
+  }
 
-    // 1. Categories
-    final existingCats = await (db.select(db.categoriesTable)
+  /// Seeds categories for a specific household if not already present.
+  static Future<void> seedForHousehold(AppDatabase db, String householdId) async {
+    final existingCategories = await (db.select(db.categoriesTable)
           ..where((c) => c.householdId.equals(householdId)))
         .get();
 
-    if (existingCats.isEmpty) {
-      final seedCats = buildSeedCategories(householdId);
-      final companions = seedCats.map((c) {
+    if (existingCategories.isEmpty) {
+      final defaultCats = await (db.select(db.categoriesTable)
+            ..where((c) => c.householdId.equals('local')))
+          .get();
+
+      final companions = defaultCats.map((c) {
         return CategoriesTableCompanion.insert(
           id: '${c.id}-$householdId',
           householdId: householdId,
-          kind: c.kind.name,
+          kind: c.kind,
           groupCode: Value(c.groupCode),
           name: c.name,
-          needOrWant: Value(c.needOrWant?.name),
+          needOrWant: Value(c.needOrWant),
           isDeduction: Value(c.isDeduction),
           isSystem: Value(c.isSystem),
           sortOrder: Value(c.sortOrder),
@@ -113,35 +105,10 @@ class AppInitService {
       }).toList();
       await db.categoryDao.upsertAll(companions);
     }
+  }
 
-    // 2. Default Accounts for Household
-    final existingAccounts = await (db.select(db.accountsTable)
-          ..where((a) => a.householdId.equals(householdId)))
-        .get();
-
-    if (existingAccounts.isEmpty) {
-      await db.accountDao.upsertAccount(
-        AccountsTableCompanion.insert(
-          id: 'acc-savings-$householdId',
-          householdId: householdId,
-          name: 'Savings Account',
-          type: 'bank',
-          currentBalancePaise: const Value(0),
-          isActive: const Value(true),
-          sortOrder: const Value(1),
-        ),
-      );
-      await db.accountDao.upsertAccount(
-        AccountsTableCompanion.insert(
-          id: 'acc-cash-$householdId',
-          householdId: householdId,
-          name: 'Cash Wallet',
-          type: 'cash',
-          currentBalancePaise: const Value(0),
-          isActive: const Value(true),
-          sortOrder: const Value(2),
-        ),
-      );
-    }
+  /// Ensures that default category taxonomy exists for an authenticated household.
+  static Future<void> ensureUserHouseholdSeed(AppDatabase db, String householdId) async {
+    await seedForHousehold(db, householdId);
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/category_icons.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/utils/month.dart';
 import '../../../data/local/database.dart';
@@ -573,10 +574,14 @@ class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
                         leading: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: cs.primaryContainer.withValues(alpha: 0.5),
+                            color: categoryIconColor(cat.kind).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(Icons.category_rounded, color: cs.primary, size: 20),
+                          child: Icon(
+                            categoryIcon(cat.name, cat.kind, cat.groupCode),
+                            color: categoryIconColor(cat.kind),
+                            size: 20,
+                          ),
                         ),
                         onTap: () => widget.onSelected(cat.id, cat.name, cat.kind),
                       ),

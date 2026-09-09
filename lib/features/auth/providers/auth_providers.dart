@@ -8,7 +8,9 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../../../data/local/database.dart';
 import '../../../core/security/password_hasher.dart';
 import '../../../core/security/secure_store.dart';
+import '../../../core/security/app_lock_service.dart';
 import '../../../core/services/app_init_service.dart';
+import '../../../core/services/sync_service.dart';
 
 final serverUrlProvider = StateProvider<String>((_) => 'http://192.168.1.166:3001');
 final tokenProvider = StateProvider<String?>((_) => null);
@@ -70,6 +72,11 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       connectTimeout: const Duration(seconds: 3),
       receiveTimeout: const Duration(seconds: 5),
       sendTimeout: const Duration(seconds: 3),
+      contentType: 'application/json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
     ),
   );
 
@@ -123,6 +130,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
             authProvider: 'restored',
             hasCompletedOnboarding: hasCompletedOnboarding,
           ));
+          Future.microtask(() async {
+            await _ref.read(syncServiceProvider).pullFromServer();
+            await _ref.read(syncServiceProvider).syncAllQueue();
+          });
           return;
         }
       }
@@ -195,6 +206,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
               authProvider: 'google',
               hasCompletedOnboarding: false, // Force true or fetch from API if supported
             ));
+            Future.microtask(() async {
+              await _ref.read(syncServiceProvider).pullFromServer();
+              await _ref.read(syncServiceProvider).syncAllQueue();
+            });
             return;
           }
         }
@@ -379,6 +394,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
           token: token,
           authProvider: 'email',
         ));
+        Future.microtask(() async {
+          await _ref.read(syncServiceProvider).pullFromServer();
+          await _ref.read(syncServiceProvider).syncAllQueue();
+        });
         return;
       } catch (_) {
         // Fallback to local database authentication
@@ -498,6 +517,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
             token: token,
             authProvider: 'email',
           ));
+          Future.microtask(() async {
+            await _ref.read(syncServiceProvider).pullFromServer();
+            await _ref.read(syncServiceProvider).syncAllQueue();
+          });
           return;
         }
       } catch (_) {
@@ -614,6 +637,11 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
         state = AsyncValue.data(state.value!.copyWith(householdId: newHouseholdId));
       }
 
+      Future.microtask(() async {
+        await _ref.read(syncServiceProvider).pullFromServer();
+        await _ref.read(syncServiceProvider).syncAllQueue();
+      });
+
       return newHouseholdId;
     } catch (e) {
       debugPrint('createHousehold error: $e');
@@ -661,6 +689,11 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       if (state.valueOrNull != null) {
         state = AsyncValue.data(state.value!.copyWith(householdId: trimmedId));
       }
+
+      Future.microtask(() async {
+        await _ref.read(syncServiceProvider).pullFromServer();
+        await _ref.read(syncServiceProvider).syncAllQueue();
+      });
     } catch (e) {
       debugPrint('joinHousehold error: $e');
       if (e is DioException && e.response?.data != null) {
@@ -766,6 +799,9 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     await SecureStore.delete('auth_user_id');
     await SecureStore.delete('auth_household_id');
     await SecureStore.delete('has_completed_onboarding');
+    await SecureStore.delete('app_lock_enabled');
+    _ref.read(appLockEnabledProvider.notifier).state = false;
+    _ref.read(appUnlockedProvider.notifier).state = false;
     final db = _ref.read(appDatabaseProvider);
     await AppInitService.clearAllDummyData(db);
     _ref.read(tokenProvider.notifier).state = null;
