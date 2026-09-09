@@ -170,10 +170,44 @@ class SyncService {
       }
     }
 
+<<<<<<< HEAD
+    // 2. Also ensure local entries for the active household in entriesTable are pushed to backend (force sync)
+    try {
+      final allEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId))).get();
+      if (allEntries.isNotEmpty) {
+        final payloads = allEntries.map((e) => {
+          'id': e.id,
+          'categoryId': e.categoryId,
+          'kind': e.kind,
+          'accountId': e.accountId,
+          'cardId': e.cardId,
+          'entryDate': e.entryDate.toIso8601String(),
+          'amountPaise': e.amountPaise,
+          'note': e.note,
+          'parentId': e.parentId,
+          'version': e.version,
+          'createdAt': e.createdAt.toIso8601String(),
+          'updatedAt': e.updatedAt.toIso8601String(),
+        }).toList();
+
+        await _dio.post(
+          '$serverUrl/entries/batch',
+          data: payloads,
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $token',
+            },
+          ),
+        );
+        return allEntries.length;
+      }
+    } catch (e) {
+      rethrow;
+=======
     // 4. Comprehensive multi-entity PUSH to backend POST /sync/batch FIRST
     try {
       // Categories
-      final categories = await (db.select(db.categoriesTable)..where((c) => c.householdId.equals(householdId))).get();
+      final categories = await (db.select(db.categoriesTable)).get();
       final categoriesPayload = categories.map((c) => {
         'id': c.id,
         'kind': c.kind,
@@ -186,7 +220,7 @@ class SyncService {
       }).toList();
 
       // Accounts (preserve exact IDs for foreign-key consistency)
-      final accounts = await (db.select(db.accountsTable)..where((a) => a.householdId.equals(householdId))).get();
+      final accounts = await (db.select(db.accountsTable)).get();
       final accountsPayload = accounts.map((a) => {
         'id': a.id,
         'name': a.name,
@@ -197,7 +231,7 @@ class SyncService {
       }).toList();
 
       // Credit Cards
-      final cards = await (db.select(db.creditCardsTable)..where((c) => c.householdId.equals(householdId))).get();
+      final cards = await (db.select(db.creditCardsTable)).get();
       final cardsPayload = cards.map((c) => {
         'id': c.id,
         'name': c.name,
@@ -217,7 +251,7 @@ class SyncService {
       }).toList();
 
       // Planned Bills (Payables)
-      final bills = await (db.select(db.plannedBillsTable)..where((b) => b.householdId.equals(householdId))).get();
+      final bills = await (db.select(db.plannedBillsTable)).get();
       final billsPayload = bills.map((b) => {
         'id': b.id,
         'name': b.name,
@@ -228,7 +262,7 @@ class SyncService {
       }).toList();
 
       // Receivables
-      final receivables = await (db.select(db.receivablesTable)..where((r) => r.householdId.equals(householdId))).get();
+      final receivables = await (db.select(db.receivablesTable)).get();
       final receivablesPayload = receivables.map((r) => {
         'id': r.id,
         'personName': r.personName,
@@ -239,7 +273,7 @@ class SyncService {
       }).toList();
 
       // Saving Goals
-      final goals = await (db.select(db.savingGoalsTable)..where((g) => g.householdId.equals(householdId))).get();
+      final goals = await (db.select(db.savingGoalsTable)).get();
       final goalsPayload = goals.map((g) => {
         'id': g.id,
         'bucket': g.bucket,
@@ -250,7 +284,7 @@ class SyncService {
       }).toList();
 
       // Sinking Funds
-      final funds = await (db.select(db.sinkingFundsTable)..where((f) => f.householdId.equals(householdId))).get();
+      final funds = await (db.select(db.sinkingFundsTable)).get();
       final fundsPayload = funds.map((f) => {
         'id': f.id,
         'name': f.name,
@@ -280,7 +314,7 @@ class SyncService {
       }).toList();
 
       // Budgets
-      final budgets = await (db.select(db.budgetsTable)..where((b) => b.householdId.equals(householdId))).get();
+      final budgets = await (db.select(db.budgetsTable)).get();
       final budgetsPayload = budgets.map((b) => {
         'id': b.id,
         'categoryId': b.categoryId,
@@ -289,7 +323,7 @@ class SyncService {
       }).toList();
 
       // Entries
-      final allEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId))).get();
+      final allEntries = await (db.select(db.entriesTable)).get();
       final entriesPayload = allEntries.map((e) => {
         'id': e.id,
         'categoryId': e.categoryId,
@@ -348,6 +382,7 @@ class SyncService {
 
     if (authState == null || authState.authMode != AuthMode.authenticated) {
       return false;
+>>>>>>> 283a0f6341f663f11cb2321f2cb226f57b45390c
     }
 
     final token = authState.token;
