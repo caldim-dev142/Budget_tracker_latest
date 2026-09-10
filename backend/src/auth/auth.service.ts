@@ -82,6 +82,10 @@ export class AuthService {
 
     const userId = uuidv4();
     const householdId = uuidv4();
+    const householdName =
+      dto.householdName && dto.householdName.trim().length > 0
+        ? dto.householdName.trim()
+        : `${dto.displayName}'s Household`;
 
     const user = await this.prisma.user.create({
       data: {
@@ -94,7 +98,7 @@ export class AuthService {
       },
     });
 
-    await this.ensureHouseholdAndDefaults(userId, householdId, dto.displayName);
+    await this.ensureHouseholdAndDefaults(userId, householdId, dto.displayName, householdName);
 
     const tokens = await this.issueTokens(user.id, householdId);
     return {
@@ -165,23 +169,29 @@ export class AuthService {
     };
   }
 
-  async ensureHouseholdAndDefaults(userId: string, householdId: string, displayName: string) {
-    try {
-      await this.prisma.household.upsert({
-        where: { id: householdId },
-        create: {
-          id: householdId,
-          name: `${displayName}'s Household`,
-          ownerId: userId,
-        },
-        update: {},
-      });
+  async ensureHouseholdAndDefaults(
+    userId: string,
+    householdId: string,
+    displayName: string,
+    householdName?: string,
+  ) {
+    const name =
+      householdName && householdName.trim().length > 0
+        ? householdName.trim()
+        : `${displayName}'s Household`;
 
-      await this.seedCategoriesForHousehold(householdId);
-      await this.seedDefaultAccountsForHousehold(householdId);
-    } catch (e) {
-      console.error('Failed to ensure household and defaults:', e);
-    }
+    await this.prisma.household.upsert({
+      where: { id: householdId },
+      create: {
+        id: householdId,
+        name,
+        ownerId: userId,
+      },
+      update: {},
+    });
+
+    await this.seedCategoriesForHousehold(householdId);
+    await this.seedDefaultAccountsForHousehold(householdId);
   }
 
   async seedDefaultAccountsForHousehold(householdId: string) {
