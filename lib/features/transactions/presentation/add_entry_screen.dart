@@ -167,7 +167,7 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
     if (mounted) {
       setState(() => _saving = false);
       if (success) {
-        ref.read(selectedMonthProvider.notifier).state = YearMonth.fromDate(_entryDate);
+        ref.read(selectedMonthProvider.notifier).select(YearMonth.fromDate(_entryDate));
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('$_kindLabel saved!'),

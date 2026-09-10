@@ -1,6 +1,6 @@
 # Budget Tracker — Project Documentation
 
-Welcome to the comprehensive technical and operational documentation for the **Budget Tracker** platform.
+Welcome to the comprehensive technical and operational documentation for the **Budget Tracker (BudgetIQ)** platform.
 
 This directory contains modular, in-depth documentation covering every layer of the application — from the reverse-engineered financial waterfall engine to the Flutter client, NestJS backend, offline-first database synchronization, and developer guidelines.
 
@@ -11,16 +11,16 @@ This directory contains modular, in-depth documentation covering every layer of 
 | Document | Description |
 |---|---|
 | [1. Project Overview](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/PROJECT_OVERVIEW.md) | High-level system design, core purpose, tech stack, and module map. |
-| [2. Financial Waterfall Engine](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/FINANCIAL_WATERFALL_ENGINE.md) | The mathematical money-flow model, 7-layer waterfall, adjustment rules, and rollover mechanics. |
-| [3. Frontend Architecture (Flutter)](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/FRONTEND_ARCHITECTURE.md) | Clean architecture, Riverpod state management, Drift SQLite DAOs, and feature modules. |
-| [4. Backend Architecture (NestJS)](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/BACKEND_ARCHITECTURE.md) | NestJS modular architecture, Prisma ORM, Dual-engine parity, and sync protocol. |
-| [5. Database Schema & Data Models](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/DATABASE_SCHEMA.md) | Schema specification for all 17 tables (PostgreSQL/Supabase + Drift SQLite). |
-| [6. Getting Started & Setup Guide](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/GETTING_STARTED_GUIDE.md) | Prerequisites, environment configuration, local development commands, and tests. |
+| [2. Financial Waterfall Engine](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/FINANCIAL_WATERFALL_ENGINE.md) | The mathematical money-flow model, 7-layer waterfall, adjustment rules, and plan customizer. |
+| [3. Frontend Architecture (Flutter)](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/FRONTEND_ARCHITECTURE.md) | Clean architecture, Riverpod state, Drift SQLite DAOs, App Lock, Timezone & Category icons. |
+| [4. Backend Architecture (NestJS)](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/BACKEND_ARCHITECTURE.md) | NestJS modular architecture, Prisma ORM, Dual-engine parity, Multi-entity batch sync, and Households. |
+| [5. Database Schema & Data Models](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/DATABASE_SCHEMA.md) | Schema specification for all 18 tables (PostgreSQL/Supabase + Drift SQLite). |
+| [6. Getting Started & Setup Guide](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/GETTING_STARTED_GUIDE.md) | Prerequisites, environment configuration, local development commands, and utility scripts. |
 | [7. Developer Rules & Invariants](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/docs/DEVELOPER_RULES_AND_ROADMAP.md) | Non-negotiable coding rules, paise arithmetic, business invariants, and handover roadmap. |
 
 ---
 
-## 💡 Quick Overview of the System
+## 💡 System Architecture
 
 ```mermaid
 graph TD
@@ -29,14 +29,15 @@ graph TD
         Riverpod["Riverpod Providers & Controllers"]
         EngineDart["Dart Financial Engine (Integer Paise)"]
         Drift["Drift SQLite Local Database"]
-        SyncClient["Sync Service (Queue & Drain)"]
+        SyncClient["Sync Service (Multi-Entity Batch Sync)"]
+        Security["App Lock (Biometrics / PIN Gate)"]
     end
 
     subgraph Backend ["NestJS Backend Server"]
-        SyncController["Sync Module (/sync/batch)"]
+        SyncController["Sync Module (POST /sync/batch)"]
         EngineTS["TypeScript Engine (Fixture Verified)"]
-        Prisma["Prisma ORM"]
-        NestModules["Feature Modules (Auth, Budgets, Entries, etc.)"]
+        Prisma["Prisma ORM (18 Models)"]
+        NestModules["Feature Modules (Auth, Budgets, Entries, Households, etc.)"]
     end
 
     subgraph Database ["Cloud Database"]
@@ -44,10 +45,11 @@ graph TD
     end
 
     UI --> Riverpod
+    UI --> Security
     Riverpod --> EngineDart
     Riverpod --> Drift
     Drift --> SyncClient
-    SyncClient <-->|REST Batch Sync| SyncController
+    SyncClient <-->|REST Batch Sync (9 Entities)| SyncController
     SyncController --> NestModules
     NestModules --> EngineTS
     NestModules --> Prisma

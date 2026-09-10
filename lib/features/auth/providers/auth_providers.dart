@@ -820,6 +820,65 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     _ref.read(tokenProvider.notifier).state = null;
     state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
   }
+
+  /// Permanently deletes user account from server (DELETE /users/me) and cleans up local session & data.
+  Future<void> deleteAccount() async {
+    final serverUrl = _ref.read(serverUrlProvider);
+    final currentAuth = state.valueOrNull;
+    final userId = currentAuth?.userId;
+
+    if (serverUrl.isNotEmpty) {
+      try {
+        await _dio.delete('$serverUrl/users/me');
+      } catch (e) {
+        debugPrint('deleteAccount backend call error: $e');
+        if (e is DioException && e.response?.data != null) {
+          final msg = e.response?.data['message'];
+          if (msg != null) throw Exception(msg.toString());
+        }
+        rethrow;
+      }
+    }
+
+    // Delete user from local Drift database if present
+    if (userId != null) {
+      final db = _ref.read(appDatabaseProvider);
+      try {
+        await (db.delete(db.usersTable)..where((u) => u.id.equals(userId))).go();
+      } catch (_) {}
+    }
+
+    // Sign out from Firebase and Google Auth if signed in
+    try {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser != null) {
+        await firebaseUser.delete().catchError((_) {});
+      }
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+
+    try {
+      if (await _googleSignIn.isSignedIn()) {
+        await _googleSignIn.disconnect().catchError((_) {});
+        await _googleSignIn.signOut();
+      }
+    } catch (_) {}
+
+    // Wipe local credentials and session
+    await SecureStore.clearTokens();
+    await SecureStore.delete('auth_email');
+    await SecureStore.delete('auth_name');
+    await SecureStore.delete('auth_user_id');
+    await SecureStore.delete('auth_household_id');
+    await SecureStore.delete('has_completed_onboarding');
+    await SecureStore.delete('app_lock_enabled');
+    _ref.read(appLockEnabledProvider.notifier).state = false;
+    _ref.read(appUnlockedProvider.notifier).state = false;
+    final db = _ref.read(appDatabaseProvider);
+    await AppInitService.clearAllDummyData(db);
+    _ref.read(tokenProvider.notifier).state = null;
+    state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
+  }
 }
 
 final authStateNotifierProvider =

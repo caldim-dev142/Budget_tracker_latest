@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/entry.dart';
 import '../../features/auth/providers/auth_providers.dart';
@@ -41,7 +42,7 @@ class SyncService {
     try {
       await syncAllQueue();
     } catch (e) {
-      print('Auto-sync triggered error: $e');
+      debugPrint('Auto-sync triggered error: $e');
     } finally {
       _isSyncing = false;
     }
@@ -131,7 +132,6 @@ class SyncService {
     if (token == null) return 0;
 
     final db = _ref.read(appDatabaseProvider);
-    final householdId = authState.householdId ?? 'default';
 
     // 1. Ensure any offline/local entities are migrated to active household
     await AppInitService.migrateLocalDataToHousehold(db, householdId);
@@ -170,44 +170,10 @@ class SyncService {
       }
     }
 
-<<<<<<< HEAD
-    // 2. Also ensure local entries for the active household in entriesTable are pushed to backend (force sync)
-    try {
-      final allEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId))).get();
-      if (allEntries.isNotEmpty) {
-        final payloads = allEntries.map((e) => {
-          'id': e.id,
-          'categoryId': e.categoryId,
-          'kind': e.kind,
-          'accountId': e.accountId,
-          'cardId': e.cardId,
-          'entryDate': e.entryDate.toIso8601String(),
-          'amountPaise': e.amountPaise,
-          'note': e.note,
-          'parentId': e.parentId,
-          'version': e.version,
-          'createdAt': e.createdAt.toIso8601String(),
-          'updatedAt': e.updatedAt.toIso8601String(),
-        }).toList();
-
-        await _dio.post(
-          '$serverUrl/entries/batch',
-          data: payloads,
-          options: Options(
-            headers: {
-              'Authorization': 'Bearer $token',
-            },
-          ),
-        );
-        return allEntries.length;
-      }
-    } catch (e) {
-      rethrow;
-=======
     // 4. Comprehensive multi-entity PUSH to backend POST /sync/batch FIRST
     try {
       // Categories
-      final categories = await (db.select(db.categoriesTable)).get();
+      final categories = await (db.select(db.categoriesTable)..where((c) => c.householdId.equals(householdId))).get();
       final categoriesPayload = categories.map((c) => {
         'id': c.id,
         'kind': c.kind,
@@ -220,7 +186,7 @@ class SyncService {
       }).toList();
 
       // Accounts (preserve exact IDs for foreign-key consistency)
-      final accounts = await (db.select(db.accountsTable)).get();
+      final accounts = await (db.select(db.accountsTable)..where((a) => a.householdId.equals(householdId))).get();
       final accountsPayload = accounts.map((a) => {
         'id': a.id,
         'name': a.name,
@@ -231,7 +197,7 @@ class SyncService {
       }).toList();
 
       // Credit Cards
-      final cards = await (db.select(db.creditCardsTable)).get();
+      final cards = await (db.select(db.creditCardsTable)..where((c) => c.householdId.equals(householdId))).get();
       final cardsPayload = cards.map((c) => {
         'id': c.id,
         'name': c.name,
@@ -251,7 +217,7 @@ class SyncService {
       }).toList();
 
       // Planned Bills (Payables)
-      final bills = await (db.select(db.plannedBillsTable)).get();
+      final bills = await (db.select(db.plannedBillsTable)..where((b) => b.householdId.equals(householdId))).get();
       final billsPayload = bills.map((b) => {
         'id': b.id,
         'name': b.name,
@@ -262,7 +228,7 @@ class SyncService {
       }).toList();
 
       // Receivables
-      final receivables = await (db.select(db.receivablesTable)).get();
+      final receivables = await (db.select(db.receivablesTable)..where((r) => r.householdId.equals(householdId))).get();
       final receivablesPayload = receivables.map((r) => {
         'id': r.id,
         'personName': r.personName,
@@ -273,7 +239,7 @@ class SyncService {
       }).toList();
 
       // Saving Goals
-      final goals = await (db.select(db.savingGoalsTable)).get();
+      final goals = await (db.select(db.savingGoalsTable)..where((g) => g.householdId.equals(householdId))).get();
       final goalsPayload = goals.map((g) => {
         'id': g.id,
         'bucket': g.bucket,
@@ -283,8 +249,18 @@ class SyncService {
         'archivedAt': g.archivedAt?.toIso8601String(),
       }).toList();
 
+      // Goal Contributions
+      final goalContribs = await (db.select(db.goalContributionsTable)).get();
+      final goalContribsPayload = goalContribs.map((c) => {
+        'id': c.id,
+        'goalId': c.goalId,
+        'amountPaise': c.amountPaise,
+        'contributionDate': c.contributionDate.toIso8601String(),
+        'note': c.note,
+      }).toList();
+
       // Sinking Funds
-      final funds = await (db.select(db.sinkingFundsTable)).get();
+      final funds = await (db.select(db.sinkingFundsTable)..where((f) => f.householdId.equals(householdId))).get();
       final fundsPayload = funds.map((f) => {
         'id': f.id,
         'name': f.name,
@@ -292,29 +268,19 @@ class SyncService {
         'archivedAt': f.archivedAt?.toIso8601String(),
       }).toList();
 
-      // Goal Contributions
-      final goalContribs = await (db.select(db.goalContributionsTable)).get();
-      final goalContribsPayload = goalContribs.map((gc) => {
-        'id': gc.id,
-        'goalId': gc.goalId,
-        'amountPaise': gc.amountPaise,
-        'contributionDate': gc.contributionDate.toIso8601String(),
-        'note': gc.note,
-      }).toList();
-
       // Fund Movements
       final fundMovements = await (db.select(db.fundMovementsTable)).get();
-      final fundMovementsPayload = fundMovements.map((fm) => {
-        'id': fm.id,
-        'fundId': fm.fundId,
-        'type': fm.type,
-        'amountPaise': fm.amountPaise,
-        'movementDate': fm.movementDate.toIso8601String(),
-        'note': fm.note,
+      final fundMovementsPayload = fundMovements.map((m) => {
+        'id': m.id,
+        'fundId': m.fundId,
+        'type': m.type,
+        'amountPaise': m.amountPaise,
+        'movementDate': m.movementDate.toIso8601String(),
+        'note': m.note,
       }).toList();
 
       // Budgets
-      final budgets = await (db.select(db.budgetsTable)).get();
+      final budgets = await (db.select(db.budgetsTable)..where((b) => b.householdId.equals(householdId))).get();
       final budgetsPayload = budgets.map((b) => {
         'id': b.id,
         'categoryId': b.categoryId,
@@ -323,7 +289,7 @@ class SyncService {
       }).toList();
 
       // Entries
-      final allEntries = await (db.select(db.entriesTable)).get();
+      final allEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId))).get();
       final entriesPayload = allEntries.map((e) => {
         'id': e.id,
         'categoryId': e.categoryId,
@@ -363,14 +329,14 @@ class SyncService {
           },
         ),
       );
-      print('Comprehensive Batch Sync to server successful: ${res.data}');
+      debugPrint('Comprehensive Batch Sync to server successful: ${res.data}');
 
       // 5. AFTER pushing local data, pull any latest server-side changes to merge
       await pullFromServer();
 
       return successCount + allEntries.length;
     } catch (e) {
-      print('Error during comprehensive batch sync: $e');
+      debugPrint('Error during comprehensive batch sync: $e');
       return successCount;
     }
   }
@@ -382,7 +348,6 @@ class SyncService {
 
     if (authState == null || authState.authMode != AuthMode.authenticated) {
       return false;
->>>>>>> 283a0f6341f663f11cb2321f2cb226f57b45390c
     }
 
     final token = authState.token;
@@ -588,10 +553,10 @@ class SyncService {
         await db.accountDao.recalculateAllAccountBalances();
       });
 
-      print('Successfully pulled and synchronized all household data from server.');
+      debugPrint('Successfully pulled and synchronized all household data from server.');
       return true;
     } catch (e) {
-      print('Failed to pull data from server: $e');
+      debugPrint('Failed to pull data from server: $e');
       return false;
     }
   }

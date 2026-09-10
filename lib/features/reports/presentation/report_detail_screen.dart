@@ -293,7 +293,6 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       _yearlyMonths = [];
       double yearlyTotalInc = 0;
       double yearlyTotalExp = 0;
-      double yearlyTotalSav = 0;
       double yearlyTotalProt = 0;
       double yearlyTotalAdj = 0;
       double yearlyTotalRes = 0;
@@ -347,7 +346,6 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
 
         yearlyTotalInc += mInc;
         yearlyTotalExp += mExp;
-        yearlyTotalSav += mSav;
         yearlyTotalProt += mProt;
         yearlyTotalAdj += mAdj;
         yearlyTotalRes += mRes;
@@ -485,7 +483,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                       GestureDetector(
                         onTap: () {
                           final prevM = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
-                          ref.read(selectedMonthProvider.notifier).state = YearMonth(prevM.year, prevM.month);
+                          ref.read(selectedMonthProvider.notifier).select(YearMonth(prevM.year, prevM.month));
                           setState(() {
                             _selectedMonth = prevM;
                           });
@@ -502,7 +500,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                       GestureDetector(
                         onTap: () {
                           final nextM = DateTime(_selectedMonth.year, _selectedMonth.month + 1);
-                          ref.read(selectedMonthProvider.notifier).state = YearMonth(nextM.year, nextM.month);
+                          ref.read(selectedMonthProvider.notifier).select(YearMonth(nextM.year, nextM.month));
                           setState(() {
                             _selectedMonth = nextM;
                           });

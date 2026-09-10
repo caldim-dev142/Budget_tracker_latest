@@ -68,7 +68,7 @@ class _LockGateState extends ConsumerState<LockGate>
     if (svc.isAuthenticating) return;
 
     final ok = await svc.authenticate(
-      reason: 'Authenticate to access BudgetIQ',
+      reason: 'Authenticate to access CalBudget',
     );
     if (mounted && ok) {
       ref.read(appUnlockedProvider.notifier).state = true;

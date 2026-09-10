@@ -107,36 +107,8 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> _seedDefaultUsers() async {
-    try {
-      final existingAdmin = await (select(usersTable)..where((u) => u.email.equals('admin@budget.app'))).get();
-      if (existingAdmin.isEmpty) {
-        await into(usersTable).insert(
-          UsersTableCompanion.insert(
-            id: 'admin-001',
-            email: 'admin@budget.app',
-            password: Value(PasswordHasher.hash('admin123')),
-            displayName: 'Super Admin',
-            householdId: 'hsh-admin',
-            authProvider: const Value('email'),
-            createdAt: DateTime.now(),
-          ),
-        );
-      }
-      final existingUser = await (select(usersTable)..where((u) => u.email.equals('user@budget.app'))).get();
-      if (existingUser.isEmpty) {
-        await into(usersTable).insert(
-          UsersTableCompanion.insert(
-            id: 'user-001',
-            email: 'user@budget.app',
-            password: Value(PasswordHasher.hash('user123')),
-            displayName: 'Demo User',
-            householdId: 'local-household',
-            authProvider: const Value('email'),
-            createdAt: DateTime.now(),
-          ),
-        );
-      }
-    } catch (_) {}
+    // Hardcoded credentials removed for production security.
+    // User accounts are created dynamically via registration or Google Sign-In.
   }
 
   /// Seed the two system categories used for borrow/lending transaction sync

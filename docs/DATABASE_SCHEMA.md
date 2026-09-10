@@ -200,7 +200,7 @@ Sealed monthly financial statements capturing the exact state of the 7-layer wat
 ---
 
 ### 15. `sync_queue`
-Local SQLite & server table storing mutations waiting for cloud synchronization.
+Local SQLite table storing mutations waiting for cloud synchronization.
 | Column | Type | Description |
 |---|---|---|
 | `id` | `TEXT` (PK) | Unique mutation ID |

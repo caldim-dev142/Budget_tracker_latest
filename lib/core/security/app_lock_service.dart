@@ -45,7 +45,7 @@ class AppLockService {
   ///
   /// Returns `true` ONLY if system authentication succeeded.
   /// Returns `false` on cancel, failure, or device error.
-  Future<bool> authenticate({String reason = 'Authenticate to access BudgetIQ'}) async {
+  Future<bool> authenticate({String reason = 'Authenticate to access CalBudget'}) async {
     if (kIsWeb) return true;
     if (_isAuthenticating) return false;
 

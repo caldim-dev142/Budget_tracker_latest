@@ -100,7 +100,6 @@ export class EntriesService {
           categoryId = `${householdId}-${categoryId}`;
         }
 
-<<<<<<< HEAD
         // Ensure category exists before inserting entry to avoid FK violation
         if (categoryId) {
           const catExists = await this.prisma.category.findUnique({ where: { id: categoryId } });
@@ -153,36 +152,6 @@ export class EntriesService {
             },
           });
         }
-=======
-        return this.prisma.entry.upsert({
-          where: { id: dto.id },
-          create: {
-            id: dto.id,
-            householdId,
-            categoryId: categoryId,
-            kind: dto.kind,
-            accountId: dto.accountId ?? null,
-            cardId: dto.cardId ?? null,
-            entryDate: new Date(dto.entryDate),
-            amountPaise: Math.round(Number(dto.amountPaise)),
-            note: dto.note ?? null,
-            parentId: dto.parentId ?? null,
-            createdBy: userId,
-            version: dto.version ?? 1,
-            createdAt: new Date(dto.createdAt ?? Date.now()),
-            updatedAt: new Date(dto.updatedAt ?? Date.now()),
-            deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
-          },
-          update: {
-            // Last-write-wins: only update if incoming version > stored version (doc 11)
-            amountPaise: Math.round(Number(dto.amountPaise)),
-            note: dto.note ?? null,
-            updatedAt: new Date(dto.updatedAt ?? Date.now()),
-            deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
-            version: dto.version ?? 1,
-          },
-        });
->>>>>>> 283a0f6341f663f11cb2321f2cb226f57b45390c
       }),
     );
 

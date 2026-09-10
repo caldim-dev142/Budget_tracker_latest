@@ -31,22 +31,26 @@ android {
         versionName = flutter.versionName
     }
 
-    signingConfigs {
-        create("release") {
-            val keyAliasProp = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
-            val keyPasswordProp = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
-            val storeFileProp = keystoreProperties.getProperty("storeFile") ?: System.getenv("STORE_FILE")
-            val storePasswordProp = keystoreProperties.getProperty("storePassword") ?: System.getenv("STORE_PASSWORD")
+    val isReleaseSigningConfigured = keystorePropertiesFile.exists() || System.getenv("STORE_FILE") != null
 
-            if (storeFileProp != null) {
-                val resolvedStoreFile = rootProject.file(storeFileProp)
-                if (resolvedStoreFile.exists()) {
-                    keyAlias = keyAliasProp
-                    keyPassword = keyPasswordProp
-                    storeFile = resolvedStoreFile
-                    storePassword = storePasswordProp
-                } else {
-                    throw GradleException("Production release keystore not found at: ${resolvedStoreFile.absolutePath}")
+    signingConfigs {
+        if (isReleaseSigningConfigured) {
+            create("release") {
+                val keyAliasProp = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
+                val keyPasswordProp = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
+                val storeFileProp = keystoreProperties.getProperty("storeFile") ?: System.getenv("STORE_FILE")
+                val storePasswordProp = keystoreProperties.getProperty("storePassword") ?: System.getenv("STORE_PASSWORD")
+
+                if (storeFileProp != null) {
+                    val resolvedStoreFile = rootProject.file(storeFileProp)
+                    if (resolvedStoreFile.exists()) {
+                        keyAlias = keyAliasProp
+                        keyPassword = keyPasswordProp
+                        storeFile = resolvedStoreFile
+                        storePassword = storePasswordProp
+                    } else {
+                        throw GradleException("Production release keystore not found at: ${resolvedStoreFile.absolutePath}")
+                    }
                 }
             }
         }
@@ -54,7 +58,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (isReleaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

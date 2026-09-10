@@ -18,7 +18,6 @@ class ReportsScreen extends ConsumerWidget {
     final authState = ref.watch(authStateProvider).valueOrNull;
     final householdId = authState?.householdId ?? 'local';
     final vmAsync = ref.watch(dashboardProvider((ym, householdId)));
-    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
