@@ -23,8 +23,11 @@ final serverUrlProvider = StateProvider<String>((_) {
     // In production release builds, default to empty string so it doesn't leak developer LAN IP
     return '';
   }
-  // Default development fallback for Android emulator / local testing
-  return 'http://10.0.2.2:3000';
+  // Default development fallback for Android emulator / local testing (NestJS runs on port 3001)
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    return 'http://10.0.2.2:3001';
+  }
+  return 'http://localhost:3001';
 });
 final tokenProvider = StateProvider<String?>((_) => null);
 
@@ -82,9 +85,9 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
   final Ref _ref;
   final _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 3),
-      receiveTimeout: const Duration(seconds: 5),
-      sendTimeout: const Duration(seconds: 3),
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      sendTimeout: const Duration(seconds: 10),
       contentType: 'application/json',
       headers: {
         'Content-Type': 'application/json',
@@ -161,7 +164,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     scopes: ['email', 'profile'],
   );
 
-  /// Authenticate with Google ID token via NestJS backend, with local offline fallback
+  /// Authenticate with Google ID token via NestJS backend
   Future<void> authenticateWithGoogleIdToken({
     required String idToken,
     required String email,
@@ -175,84 +178,54 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
 
     try {
       final serverUrl = _ref.read(serverUrlProvider);
-      try {
-        if (idToken.isNotEmpty) {
-          final res = await _dio.post(
-            '$serverUrl/auth/google',
-            data: {
-              'idToken': idToken,
-            },
-          );
-          final data = res.data;
-          final token = data['accessToken'];
-          final refreshToken = data['refreshToken'];
-          final user = data['user'];
-
-          if (token != null) {
-            await SecureStore.writeAccessToken(token);
-            if (refreshToken != null) {
-              await SecureStore.writeRefreshToken(refreshToken);
-            }
-            final householdId = user['householdId'] ?? 'household';
-            final uId = user['id'] ?? 'user';
-            final uEmail = user['email'] ?? normEmail;
-            final uName = user['displayName'] ?? name;
-
-            await SecureStore.write('auth_email', uEmail);
-            await SecureStore.write('auth_name', uName);
-            await SecureStore.write('auth_user_id', uId);
-            await SecureStore.write('auth_household_id', householdId);
-
-            final db = _ref.read(appDatabaseProvider);
-            await AppInitService.clearAllDummyData(db);
-            await AppInitService.ensureUserHouseholdSeed(db, householdId);
-
-            _ref.read(tokenProvider.notifier).state = token;
-            state = AsyncValue.data(AuthState(
-              authMode: AuthMode.authenticated,
-              isAuthenticated: true,
-              email: uEmail,
-              displayName: uName,
-              householdId: householdId,
-              userId: uId,
-              token: token,
-              authProvider: 'google',
-              hasCompletedOnboarding: false, // Force true or fetch from API if supported
-            ));
-            Future.microtask(() async {
-              await _ref.read(syncServiceProvider).pullFromServer();
-              await _ref.read(syncServiceProvider).syncAllQueue();
-            });
-            return;
-          }
-        }
-      } catch (_) {
-        // Connection offline or backend unreachable — fallback to local database
+      if (serverUrl.isEmpty) {
+        throw Exception('Server URL is not configured. Please contact support.');
       }
 
-      // Local offline database fallback with REAL Google user account
+      if (idToken.isEmpty) {
+        throw Exception('Missing Google ID token.');
+      }
+
+      final res = await _dio.post(
+        '$serverUrl/auth/google',
+        data: {
+          'idToken': idToken,
+        },
+      );
+      final data = res.data;
+      final token = data['accessToken'];
+      final refreshToken = data['refreshToken'];
+      final user = data['user'];
+
+      if (token == null || user == null) {
+        throw Exception('Invalid response received from authentication server.');
+      }
+
+      final householdId = user['householdId'] ?? 'household';
+      final uId = user['id'] ?? 'user';
+      final uEmail = user['email'] ?? normEmail;
+      final uName = user['displayName'] ?? name;
+
+      await SecureStore.writeAccessToken(token);
+      if (refreshToken != null) {
+        await SecureStore.writeRefreshToken(refreshToken);
+      }
+
+      await SecureStore.write('auth_email', uEmail);
+      await SecureStore.write('auth_name', uName);
+      await SecureStore.write('auth_user_id', uId);
+      await SecureStore.write('auth_household_id', householdId);
+
       final db = _ref.read(appDatabaseProvider);
       await _ensureUsersTable(db);
-      final existingUsers = await (db.select(db.usersTable)
-            ..where((u) => u.email.equals(normEmail)))
-          .get();
-
-      late String userId;
-      late String householdId;
-
-      if (existingUsers.isNotEmpty) {
-        final u = existingUsers.first;
-        userId = u.id;
-        householdId = u.householdId;
-      } else {
-        userId = 'usr-${DateTime.now().millisecondsSinceEpoch}';
-        householdId = 'hsh-${DateTime.now().millisecondsSinceEpoch}';
+      final existingLocal = await (db.select(db.usersTable)..where((u) => u.id.equals(uId))).get();
+      if (existingLocal.isEmpty) {
         await db.into(db.usersTable).insert(
               UsersTableCompanion.insert(
-                id: userId,
-                email: normEmail,
+                id: uId,
+                email: uEmail,
                 password: const Value.absent(),
-                displayName: name,
+                displayName: uName,
                 householdId: householdId,
                 authProvider: const Value('google'),
                 createdAt: DateTime.now(),
@@ -260,29 +233,42 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
             );
       }
 
-      await SecureStore.write('auth_email', normEmail);
-      await SecureStore.write('auth_name', name);
-      await SecureStore.write('auth_user_id', userId);
-      await SecureStore.write('auth_household_id', householdId);
-
       await AppInitService.clearAllDummyData(db);
       await AppInitService.ensureUserHouseholdSeed(db, householdId);
-      final token = 'google-oauth-${DateTime.now().millisecondsSinceEpoch}';
-      await SecureStore.writeAccessToken(token);
+
       _ref.read(tokenProvider.notifier).state = token;
       state = AsyncValue.data(AuthState(
-        authMode: AuthMode.offline,
+        authMode: AuthMode.authenticated,
         isAuthenticated: true,
-        userId: userId,
+        email: uEmail,
+        displayName: uName,
         householdId: householdId,
-        email: normEmail,
-        displayName: name,
+        userId: uId,
         token: token,
         authProvider: 'google',
         hasCompletedOnboarding: false,
       ));
+      Future.microtask(() async {
+        await _ref.read(syncServiceProvider).pullFromServer();
+        await _ref.read(syncServiceProvider).syncAllQueue();
+      });
+    } on DioException catch (e, st) {
+      String msg = 'Google authentication failed. Please check your connection.';
+      if (e.response != null) {
+        final resData = e.response?.data;
+        if (resData is Map && resData.containsKey('message')) {
+          final m = resData['message'];
+          msg = m is List ? m.join(', ') : m.toString();
+        }
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        msg = 'Unable to connect to server. Please check your internet connection and try again.';
+      }
+      state = AsyncValue.error(msg, st);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      state = AsyncValue.error(e.toString().replaceAll('Exception: ', ''), st);
     }
   }
 
@@ -387,42 +373,101 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
 
     try {
       final serverUrl = _ref.read(serverUrlProvider);
-      try {
-        final res = await _dio.post(
-          '$serverUrl/auth/login',
-          data: {'email': normEmail, 'password': password},
-        );
-        final data = res.data;
-        final token = data['accessToken'];
-        final user = data['user'];
+      if (serverUrl.isNotEmpty) {
+        try {
+          final res = await _dio.post(
+            '$serverUrl/auth/login',
+            data: {'email': normEmail, 'password': password},
+          );
+          final data = res.data;
+          final token = data['accessToken'];
+          final refreshToken = data['refreshToken'];
+          final user = data['user'];
 
-        _ref.read(tokenProvider.notifier).state = token;
-        state = AsyncValue.data(AuthState(
-          authMode: AuthMode.authenticated,
-          isAuthenticated: true,
-          email: user['email'],
-          displayName: user['displayName'],
-          householdId: user['householdId'],
-          userId: user['id'],
-          token: token,
-          authProvider: 'email',
-        ));
-        Future.microtask(() async {
-          await _ref.read(syncServiceProvider).pullFromServer();
-          await _ref.read(syncServiceProvider).syncAllQueue();
-        });
-        return;
-      } catch (_) {
-        // Fallback to local database authentication
+          if (token != null && user != null) {
+            final userId = user['id'] as String;
+            final householdId = user['householdId'] as String;
+            final userEmail = (user['email'] as String?) ?? normEmail;
+            final displayName = (user['displayName'] as String?) ?? userEmail.split('@').first;
+
+            await SecureStore.writeAccessToken(token);
+            if (refreshToken != null) {
+              await SecureStore.writeRefreshToken(refreshToken);
+            }
+            await SecureStore.write('auth_email', userEmail);
+            await SecureStore.write('auth_name', displayName);
+            await SecureStore.write('auth_user_id', userId);
+            await SecureStore.write('auth_household_id', householdId);
+
+            // Sync user cache locally for offline access
+            final existingUsers = await (db.select(db.usersTable)..where((u) => u.id.equals(userId))).get();
+            if (existingUsers.isEmpty) {
+              await db.into(db.usersTable).insert(
+                UsersTableCompanion.insert(
+                  id: userId,
+                  email: userEmail,
+                  password: Value(PasswordHasher.hash(password)),
+                  displayName: displayName,
+                  householdId: householdId,
+                  authProvider: const Value('email'),
+                  createdAt: DateTime.now(),
+                ),
+              );
+            }
+
+            await AppInitService.ensureUserHouseholdSeed(db, householdId);
+            _ref.read(tokenProvider.notifier).state = token;
+
+            state = AsyncValue.data(AuthState(
+              authMode: AuthMode.authenticated,
+              isAuthenticated: true,
+              email: userEmail,
+              displayName: displayName,
+              householdId: householdId,
+              userId: userId,
+              token: token,
+              authProvider: 'email',
+            ));
+
+            Future.microtask(() async {
+              await _ref.read(syncServiceProvider).pullFromServer();
+              await _ref.read(syncServiceProvider).syncAllQueue();
+            });
+            return;
+          }
+        } on DioException catch (e) {
+          if (e.response?.statusCode == 401 || e.response?.statusCode == 400) {
+            state = AsyncValue.error(
+              'Invalid email or password. Please check your credentials.',
+              StackTrace.current,
+            );
+            return;
+          }
+          // If server is unreachable, allow falling back to cached offline account if present
+          if (e.type != DioExceptionType.connectionTimeout &&
+              e.type != DioExceptionType.sendTimeout &&
+              e.type != DioExceptionType.receiveTimeout &&
+              e.type != DioExceptionType.connectionError) {
+            final resData = e.response?.data;
+            String msg = 'Authentication failed.';
+            if (resData is Map && resData.containsKey('message')) {
+              final m = resData['message'];
+              msg = m is List ? m.join(', ') : m.toString();
+            }
+            state = AsyncValue.error(msg, StackTrace.current);
+            return;
+          }
+        }
       }
 
+      // Offline login fallback ONLY for already cached local users
       final existingUsers = await (db.select(db.usersTable)
             ..where((u) => u.email.equals(normEmail)))
           .get();
 
       if (existingUsers.isEmpty) {
         state = AsyncValue.error(
-          'No account found for "$normEmail". Please register an account first.',
+          'Unable to reach server. Please check your internet connection.',
           StackTrace.current,
         );
         return;
@@ -471,14 +516,14 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
         userId: user.id,
         token: token,
         authProvider: user.authProvider,
-        hasCompletedOnboarding: false, // Default to false for new logins unless fetched from backend
+        hasCompletedOnboarding: false,
       ));
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      state = AsyncValue.error(e.toString().replaceAll('Exception: ', ''), st);
     }
   }
 
-  /// Real Account Registration & Persistent Storage
+  /// Real Account Registration & Persistent Storage in Supabase
   Future<void> register({
     required String email,
     required String password,
@@ -489,109 +534,103 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     final db = _ref.read(appDatabaseProvider);
     await _ensureUsersTable(db);
     final normEmail = email.trim().toLowerCase();
+    final cleanDisplayName =
+        displayName.trim().isNotEmpty ? displayName.trim() : normEmail.split('@').first;
+    final cleanHouseholdName =
+        householdName.trim().isNotEmpty ? householdName.trim() : "$cleanDisplayName's Household";
 
     try {
       final serverUrl = _ref.read(serverUrlProvider);
-      try {
-        final res = await _dio.post(
-          '$serverUrl/auth/register',
-          data: {
-            'email': normEmail,
-            'password': password,
-            'displayName': displayName,
-            'householdName': householdName,
-          },
-        );
-        final data = res.data;
-        final token = data['accessToken'];
-        final refreshToken = data['refreshToken'];
-        final user = data['user'];
-
-        if (token != null) {
-          await SecureStore.writeAccessToken(token);
-          if (refreshToken != null) {
-            await SecureStore.writeRefreshToken(refreshToken);
-          }
-          await SecureStore.write('auth_email', user['email']);
-          await SecureStore.write('auth_name', user['displayName']);
-          await SecureStore.write('auth_user_id', user['id']);
-          await SecureStore.write('auth_household_id', user['householdId']);
-
-          await AppInitService.ensureUserHouseholdSeed(db, user['householdId']);
-
-          _ref.read(tokenProvider.notifier).state = token;
-          state = AsyncValue.data(AuthState(
-            authMode: AuthMode.authenticated,
-            isAuthenticated: true,
-            email: user['email'],
-            displayName: user['displayName'],
-            householdId: user['householdId'],
-            userId: user['id'],
-            token: token,
-            authProvider: 'email',
-          ));
-          Future.microtask(() async {
-            await _ref.read(syncServiceProvider).pullFromServer();
-            await _ref.read(syncServiceProvider).syncAllQueue();
-          });
-          return;
-        }
-      } catch (_) {
-        // Fallback to local database registration
+      if (serverUrl.isEmpty) {
+        throw Exception('Server URL is not configured. Please check your application settings.');
       }
 
-      final existing = await (db.select(db.usersTable)
-            ..where((u) => u.email.equals(normEmail)))
-          .get();
+      final res = await _dio.post(
+        '$serverUrl/auth/register',
+        data: {
+          'email': normEmail,
+          'password': password,
+          'displayName': cleanDisplayName,
+          'householdName': cleanHouseholdName,
+        },
+      );
+      final data = res.data;
+      final token = data['accessToken'];
+      final refreshToken = data['refreshToken'];
+      final user = data['user'];
 
-      if (existing.isNotEmpty) {
-        state = AsyncValue.error(
-          'An account with email "$normEmail" already exists. Please log in.',
-          StackTrace.current,
-        );
-        return;
+      if (token == null || user == null) {
+        throw Exception('Invalid response received from authentication server.');
       }
 
-      final userId = 'usr-${DateTime.now().millisecondsSinceEpoch}';
-      final householdId = 'hsh-${DateTime.now().millisecondsSinceEpoch}';
-      final hashedPassword = PasswordHasher.hash(password);
-      final finalDisplayName = displayName.trim().isNotEmpty ? displayName.trim() : normEmail.split('@').first;
+      final userId = user['id'] as String;
+      final householdId = user['householdId'] as String;
+      final retEmail = (user['email'] as String?) ?? normEmail;
+      final retName = (user['displayName'] as String?) ?? cleanDisplayName;
 
-      await db.into(db.usersTable).insert(
-            UsersTableCompanion.insert(
-              id: userId,
-              email: normEmail,
-              password: Value(hashedPassword),
-              displayName: finalDisplayName,
-              householdId: householdId,
-              authProvider: const Value('email'),
-              createdAt: DateTime.now(),
-            ),
-          );
-
-      final token = 'auth-${DateTime.now().millisecondsSinceEpoch}';
       await SecureStore.writeAccessToken(token);
-      await SecureStore.write('auth_email', normEmail);
-      await SecureStore.write('auth_name', finalDisplayName);
+      if (refreshToken != null) {
+        await SecureStore.writeRefreshToken(refreshToken);
+      }
+      await SecureStore.write('auth_email', retEmail);
+      await SecureStore.write('auth_name', retName);
       await SecureStore.write('auth_user_id', userId);
       await SecureStore.write('auth_household_id', householdId);
 
-      await AppInitService.ensureUserHouseholdSeed(db, householdId);
-      _ref.read(tokenProvider.notifier).state = token;
+      // Persist authenticated profile to local Drift database cache
+      final existing = await (db.select(db.usersTable)..where((u) => u.id.equals(userId))).get();
+      if (existing.isEmpty) {
+        await db.into(db.usersTable).insert(
+              UsersTableCompanion.insert(
+                id: userId,
+                email: retEmail,
+                password: Value(PasswordHasher.hash(password)),
+                displayName: retName,
+                householdId: householdId,
+                authProvider: const Value('email'),
+                createdAt: DateTime.now(),
+              ),
+            );
+      }
 
+      await AppInitService.ensureUserHouseholdSeed(db, householdId);
+
+      _ref.read(tokenProvider.notifier).state = token;
       state = AsyncValue.data(AuthState(
-        authMode: AuthMode.offline,
+        authMode: AuthMode.authenticated,
         isAuthenticated: true,
-        email: normEmail,
-        displayName: finalDisplayName,
+        email: retEmail,
+        displayName: retName,
         householdId: householdId,
         userId: userId,
         token: token,
         authProvider: 'email',
         hasCompletedOnboarding: false,
       ));
+
+      Future.microtask(() async {
+        await _ref.read(syncServiceProvider).pullFromServer();
+        await _ref.read(syncServiceProvider).syncAllQueue();
+      });
+    } on DioException catch (e, st) {
+      String msg = 'Registration failed. Please check your internet connection.';
+      if (e.response != null) {
+        final resData = e.response?.data;
+        if (resData is Map && resData.containsKey('message')) {
+          final m = resData['message'];
+          msg = m is List ? m.join(', ') : m.toString();
+        } else if (e.response?.statusCode == 409) {
+          msg = 'An account with email "$normEmail" already exists. Please sign in.';
+        }
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        msg = 'Unable to connect to server. Please check your internet connection and try again.';
+      }
+      state = AsyncValue.error(msg, st);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      state = AsyncValue.error(e.toString().replaceAll('Exception: ', ''), st);
     }
   }
 
