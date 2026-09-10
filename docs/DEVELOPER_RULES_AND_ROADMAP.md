@@ -29,28 +29,28 @@ $$\text{Opening} + \text{Last Month Reserves} + \text{Income} + \text{Adjustment
 
 ---
 
-## 2. Implementation & Handover Roadmap
+## 2. Implementation Status & Handover Roadmap
 
-### Phase 1: Critical Bug Fixes (P0)
+### Phase 1: Core System Alignment (Completed)
 - [x] **Task 1.0 — 1:1 Integer Paise & Offline Sync Alignment**: Aligned backend Prisma schema, sync DTOs, and Drift SQLite models to standard 32/64-bit integer paise.
-- [ ] **Task 1.1 — Real Data in Reports**: Replace `_initMockData()` in `report_detail_screen.dart` with live Drift DAO / Riverpod queries matching the budget & transaction screens.
-- [ ] **Task 1.2 — Engine Adjustment Sign Fix**: Update `RollupEngine.netAdjustments()` in `rollups.dart` to respect the `isDeduction` category flag (matching `dashboard_providers.dart` and `account_dao.dart`).
-- [ ] **Task 1.3 — Plan-vs-Actual Reconciliation Insight**: Compute and surface `reconciliationDifference = remaining − closingBalance` at month-close as a diagnostic insight.
-- [ ] **Task 1.4 — Snapshot Household ID**: Pass explicit `householdId` into `CloseMonthUseCase.execute()` rather than using the `yearMonth` placeholder.
-- [ ] **Task 1.5 — Typed AuthMode Enum**: Replace string sentinel checks (`'mock-token'`, `'offline-token'`) with a strongly-typed `AuthMode` enum.
-- [ ] **Task 1.6 — Foreground Connectivity Listener**: Re-enable network change detection for auto-sync upon reconnection.
+- [x] **Task 1.1 — Real Data & Plan Distribution in Reports**: Implemented live Drift DAO / Riverpod queries in reports alongside interactive Plan Distribution sliders (50/30/20).
+- [x] **Task 1.2 — Multi-Entity Batch Sync Engine**: Comprehensive bidirectional synchronization for categories, accounts, cards, bills, receivables, saving goals, sinking funds, budgets, and entries (`/sync/batch`).
+- [x] **Task 1.3 — Native Device Security & App Lock**: Implemented native biometric / PIN authentication (`local_auth`) with lifecycle-aware `LockGate`.
+- [x] **Task 1.4 — Dynamic Category Icon Engine**: Implemented 60+ keyword-mapped icons with category kind color tinting.
+- [x] **Task 1.5 — Multi-User Household Management**: Implemented full household lifecycle (create, join, member management, active household switching) across backend and Flutter settings.
+- [x] **Task 1.6 — Global Timezone Localization**: Added timezone selection with UTC offset mapping across all transaction dates and reports.
+- [x] **Task 1.7 — Cross-Platform Branding Pipeline**: Created `scripts/generate_app_icons.py` for Android, iOS, Windows, and Web.
 
-### Phase 2: First-Time User Experience (P0)
+### Phase 2: First-Time User Experience & Onboarding
 - [ ] **Task 2.1 — Financial Setup Wizard**: Guided 4-step first-launch onboarding:
   1. Salary / Primary Income
   2. Core Mandatory Expense Estimates (selected from seeded taxonomy)
   3. Emergency Fund Target
   4. Primary Savings Goal Target
 
-### Phase 3: Core Feature Extensions (P1 / P2)
+### Phase 3: Advanced Financial Extensions
 - [ ] **Task 3.1 — Emergency Fund Calculator**: Target = $N \text{ months (default 3)} \times \text{Average(Fees + Needs spend)}$.
 - [ ] **Task 3.2 — EMI-Aware Debt Commitments**: Dedicated loan/tenure tracking displaying debt-free milestone dates.
 - [ ] **Task 3.3 — Payment Method Tagging**: Add optional payment mode tags (UPI, Cash, Card, Bank Transfer) to entries and report breakdowns.
-- [ ] **Task 3.4 — Threshold Financial Insights**: Rule-based budget warnings and overspend notifications.
-- [x] **Task 3.5 — Multi-User Household Invites**: Multi-device household sharing via backend `/households` endpoints and Flutter Settings screen.
-- [ ] **Task 3.6 — Split Large Screen Files**: Modularize `planning_screen.dart` (1,429 lines), `budget_screen.dart` (1,286 lines), and `dashboard_screen.dart` (1,033 lines) into sub-widgets.
+- [ ] **Task 3.4 — Threshold Financial Insights & Push Alerts**: Rule-based budget warnings and overspend notifications.
+- [ ] **Task 3.5 — Modular Screen Decomposition**: Break down large presentation files (`planning_screen.dart`, `budget_screen.dart`, `dashboard_screen.dart`) into smaller sub-widgets.

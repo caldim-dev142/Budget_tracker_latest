@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account & Data Deletion Request — CalBudget</title>
+  <style>
+    :root {
+      --primary: #0E7C7B;
+      --primary-dark: #095251;
+      --error: #DC2626;
+      --error-bg: #FEF2F2;
+      --text-main: #1F2937;
+      --text-muted: #4B5563;
+      --bg: #F9FAFB;
+      --card-bg: #FFFFFF;
+      --border: #E5E7EB;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.7;
+      color: var(--text-main);
+      background-color: var(--bg);
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      padding: 48px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+
+    .header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--primary);
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text-main);
+      margin-bottom: 8px;
+    }
+
+    .effective-date {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary-dark);
+      margin-top: 36px;
+      margin-bottom: 14px;
+    }
+
+    p {
+      margin-bottom: 16px;
+      color: var(--text-muted);
+    }
+
+    ul, ol {
+      margin-left: 24px;
+      margin-bottom: 20px;
+      color: var(--text-muted);
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    strong {
+      color: var(--text-main);
+    }
+
+    .warning-box {
+      background-color: var(--error-bg);
+      border-left: 4px solid var(--error);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+      margin: 24px 0;
+    }
+
+    .warning-box p {
+      margin-bottom: 0;
+      color: #991B1B;
+      font-weight: 500;
+    }
+
+    .method-card {
+      background: #F3F4F6;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 20px 0;
+    }
+
+    .method-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+
+    input[type="email"],
+    input[type="text"],
+    textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #D1D5DB;
+      border-radius: 8px;
+      font-size: 14px;
+      background-color: #FFFFFF;
+      color: var(--text-main);
+      transition: border-color 0.2s;
+    }
+
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(14, 124, 123, 0.15);
+    }
+
+    button {
+      background-color: var(--error);
+      color: #FFFFFF;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    button:hover {
+      background-color: #B91C1C;
+    }
+
+    a {
+      color: var(--primary);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: var(--primary-dark);
+    }
+
+    .footer {
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+      padding-top: 24px;
+      text-align: center;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 16px 8px;
+      }
+      .container {
+        padding: 24px 20px;
+      }
+      h1 {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <div class="brand">💰 CalBudget</div>
+      <h1>Account & Data Deletion Request</h1>
+      <div class="effective-date">Google Play Compliance • Caldim Products</div>
+    </div>
+
+    <div class="warning-box">
+      <p><strong>Warning:</strong> Account deletion is permanent and irreversible. Once processed, your user account, login credentials, authentication tokens, and personal financial data stored in the cloud will be permanently deleted.</p>
+    </div>
+
+    <h2>How to Delete Your Account</h2>
+    <p>We provide two convenient ways to delete your account and personal data:</p>
+
+    <!-- Method 1 -->
+    <div class="method-card">
+      <h3>📱 Option 1: Instant In-App Deletion (Recommended)</h3>
+      <p>If you have the CalBudget application installed on your device, you can delete your account instantly:</p>
+      <ol>
+        <li>Open the <strong>CalBudget</strong> app.</li>
+        <li>Tap <strong>Settings</strong> (gear icon in the bottom navigation).</li>
+        <li>Scroll down to the <strong>Account Actions</strong> section.</li>
+        <li>Tap <strong>Delete Account</strong>.</li>
+        <li>Confirm the destructive action in the warning dialog by tapping <strong>Delete Permanently</strong>.</li>
+      </ol>
+      <p><em>Your account and cloud session will be deleted immediately, and local storage will be sanitized.</em></p>
+    </div>
+
+    <!-- Method 2 -->
+    <div class="method-card">
+      <h3>🌐 Option 2: Submit a Web Deletion Request</h3>
+      <p>If you have uninstalled the app or cannot access your device, submit the form below to request account deletion from our support team:</p>
+      
+      <form id="deletionForm" onsubmit="handleFormSubmit(event)">
+        <div class="form-group">
+          <label for="email">Registered Email Address *</label>
+          <input type="email" id="email" required placeholder="your.email@example.com">
+        </div>
+
+        <div class="form-group">
+          <label for="name">Display Name (Optional)</label>
+          <input type="text" id="name" placeholder="John Doe">
+        </div>
+
+        <div class="form-group">
+          <label for="reason">Reason for Deletion (Optional)</label>
+          <textarea id="reason" rows="3" placeholder="Tell us why you want to delete your account..."></textarea>
+        </div>
+
+        <button type="submit">Submit Account Deletion Request</button>
+      </form>
+      <p id="confirmationMessage" style="display:none; color: #047857; font-weight: 600; margin-top: 14px;">
+        ✓ Your request draft has been prepared. Please send the generated email from your registered address to complete verification.
+      </p>
+    </div>
+
+    <h2>What Data Is Deleted?</h2>
+    <p>Upon processing your deletion request, the following information is permanently purged:</p>
+    <ul>
+      <li><strong>User Profile:</strong> Name, registered email address, hashed passwords, OAuth tokens, and unique user ID.</li>
+      <li><strong>Session Data:</strong> All active authentication tokens and device associations.</li>
+      <li><strong>Sole-Member Household Data:</strong> If you are the sole member of a household, all associated entries, categories, planned bills, receivables, sinking funds, budgets, and credit card entries are deleted permanently.</li>
+    </ul>
+
+    <h2>Multi-Member Household Notice</h2>
+    <p>If you belong to a shared household with other active family members:</p>
+    <ul>
+      <li>Your personal user account and individual credentials will be deleted.</li>
+      <li>If you were the household owner, ownership is automatically reassigned to the next oldest household member.</li>
+      <li>Shared financial transactions belonging to the household will remain accessible to the remaining household members so their budget remains intact.</li>
+    </ul>
+
+    <h2>Processing Timeline</h2>
+    <ul>
+      <li><strong>In-App Deletion:</strong> Immediate.</li>
+      <li><strong>Web/Email Request:</strong> Processed within 7 business days following identity verification.</li>
+    </ul>
+
+    <h2>Contact Support</h2>
+    <p>If you need assistance with account deletion or data privacy, contact us directly:</p>
+    <ul>
+      <li><strong>Email:</strong> <a href="mailto:support@calbudget.app?subject=Account%20Deletion%20Request">support@calbudget.app</a></li>
+      <li><strong>Company:</strong> Caldim Products</li>
+    </ul>
+
+    <div class="footer">
+      &copy; 2026 Caldim Products. All rights reserved. • 
+      <a href="https://www.caldimproducts.com/calbudget/privacy" target="_blank">Privacy Policy</a> • 
+      <a href="https://www.caldimproducts.com/calbudget/terms" target="_blank">Terms of Service</a>
+    </div>
+  </div>
+
+  <script>
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const name = document.getElementById('name').value.trim();
+      const reason = document.getElementById('reason').value.trim();
+
+      const subject = encodeURIComponent("CalBudget Account Deletion Request - " + email);
+      const body = encodeURIComponent(
+        "Please delete my CalBudget user account and all associated personal data.\n\n" +
+        "Account Email: " + email + "\n" +
+        "Display Name: " + (name || "N/A") + "\n" +
+        "Reason: " + (reason || "User requested deletion") + "\n\n" +
+        "I confirm that I am requesting permanent deletion of this account."
+      );
+
+      // Open mail client
+      window.location.href = `mailto:support@calbudget.app?subject=${subject}&body=${body}`;
+      document.getElementById('confirmationMessage').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

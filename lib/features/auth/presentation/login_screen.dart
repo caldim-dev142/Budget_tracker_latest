@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../providers/auth_providers.dart';
 import '../../../shared/widgets/pressable_scale.dart';
+import '../../../core/constants/legal_constants.dart';
 
 /// S2 — Login / Register Screen (doc 09 S2).
 class LoginScreen extends ConsumerStatefulWidget {
@@ -106,275 +107,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         context.go('/dashboard');
       }
     }
-  }
-
-  void _showGoogleAccountPicker() {
-    String selectedEmail = 'user.budget@gmail.com';
-    bool isCustom = false;
-    final googleEmailCtrl = TextEditingController();
-    final googleFormKey = GlobalKey<FormState>();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (ctx) {
-        final cs = Theme.of(ctx).colorScheme;
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 24,
-                right: 24,
-                top: 16,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-              ),
-              child: Form(
-                key: googleFormKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: cs.outlineVariant.withValues(alpha: 0.6),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-
-                    // Google OAuth Header
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 6),
-                            ],
-                          ),
-                          child: const Text(
-                            ' G ',
-                            style: TextStyle(
-                              color: Color(0xFF4285F4),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 20,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Choose an account',
-                              style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 18,
-                                  ),
-                            ),
-                            Text(
-                              'to continue to Budget Tracker',
-                              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                    color: cs.onSurfaceVariant,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Account Option 1
-                    ListTile(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      tileColor: (!isCustom && selectedEmail == 'user.budget@gmail.com')
-                          ? const Color(0xFF4285F4).withValues(alpha: 0.1)
-                          : null,
-                      leading: const CircleAvatar(
-                        backgroundColor: Color(0xFF4285F4),
-                        child: Text('U', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
-                      title: const Text('User Budget', style: TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: const Text('user.budget@gmail.com'),
-                      trailing: (!isCustom && selectedEmail == 'user.budget@gmail.com')
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4285F4))
-                          : null,
-                      onTap: () {
-                        setModalState(() {
-                          isCustom = false;
-                          selectedEmail = 'user.budget@gmail.com';
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 6),
-
-                    // Account Option 2
-                    ListTile(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      tileColor: (!isCustom && selectedEmail == 'family.budget@gmail.com')
-                          ? const Color(0xFF4285F4).withValues(alpha: 0.1)
-                          : null,
-                      leading: const CircleAvatar(
-                        backgroundColor: Color(0xFF34A853),
-                        child: Text('F', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
-                      title: const Text('Family Account', style: TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: const Text('family.budget@gmail.com'),
-                      trailing: (!isCustom && selectedEmail == 'family.budget@gmail.com')
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4285F4))
-                          : null,
-                      onTap: () {
-                        setModalState(() {
-                          isCustom = false;
-                          selectedEmail = 'family.budget@gmail.com';
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 6),
-
-                    // Custom Account Option
-                    ListTile(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      tileColor: isCustom ? const Color(0xFF4285F4).withValues(alpha: 0.1) : null,
-                      leading: CircleAvatar(
-                        backgroundColor: cs.surfaceContainerHighest,
-                        child: Icon(Icons.person_add_outlined, color: cs.onSurfaceVariant),
-                      ),
-                      title: const Text('Use another Google Account', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Sign in with a different email address'),
-                      trailing: isCustom ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4285F4)) : null,
-                      onTap: () {
-                        setModalState(() {
-                          isCustom = true;
-                        });
-                      },
-                    ),
-
-                    if (isCustom) ...[
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: googleEmailCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Google Email Address *',
-                          prefixIcon: const Icon(Icons.mark_email_read_outlined),
-                          hintText: 'your.name@gmail.com',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        keyboardType: TextInputType.emailAddress,
-                        autofocus: true,
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Google email required';
-                          if (!v.contains('@') || !v.contains('.')) {
-                            return 'Enter a valid Google email address';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-
-                    const SizedBox(height: 18),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.security_rounded, size: 18, color: Color(0xFF4285F4)),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Google OAuth 2.0 Secure Authorization. Your session is protected.',
-                              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Action Button
-                    PressableScale(
-                      onTap: () async {
-                        String emailToAuth = selectedEmail;
-                        if (isCustom) {
-                          if (!googleFormKey.currentState!.validate()) return;
-                          emailToAuth = googleEmailCtrl.text.trim();
-                        }
-
-                        Navigator.pop(ctx);
-                        setState(() => _isGoogleLoading = true);
-
-                        await ref.read(authStateNotifierProvider.notifier).googleSignIn(
-                              email: emailToAuth,
-                              displayName: emailToAuth.split('@').first,
-                            );
-
-                        if (mounted) {
-                          setState(() => _isGoogleLoading = false);
-                          final authState = ref.read(authStateNotifierProvider);
-                          if (authState.hasError) {
-                            final errText = authState.error.toString().replaceAll('Exception: ', '');
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(errText),
-                                backgroundColor: Colors.redAccent,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Google Sign-In Successful: Signed in as $emailToAuth'),
-                                backgroundColor: const Color(0xFF34A853),
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                            );
-                            context.go('/dashboard');
-                          }
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1A73E8), // Official Google Blue
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Center(
-                          child: Text(
-                            isCustom ? 'Continue with Selected Account' : 'Continue as $selectedEmail',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-          },
-        );
-      },
-    );
   }
 
   @override
@@ -625,6 +357,53 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             : 'New here? Create an account',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Privacy Policy & Terms of Service Links
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'By continuing, you agree to our ',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontSize: 11,
+                              ),
+                        ),
+                        InkWell(
+                          onTap: () => LegalConstants.showTermsDialog(context),
+                          child: Text(
+                            'Terms',
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          ' & ',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontSize: 11,
+                              ),
+                        ),
+                        InkWell(
+                          onTap: () => LegalConstants.showPrivacyPolicyDialog(context),
+                          child: Text(
+                            'Privacy Policy',
+                            style: TextStyle(
+                              color: cs.primary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

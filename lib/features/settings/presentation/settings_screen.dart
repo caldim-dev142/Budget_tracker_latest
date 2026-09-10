@@ -13,6 +13,7 @@ import '../../auth/providers/auth_providers.dart';
 import '../../../data/local/database.dart';
 import '../../../core/services/sync_service.dart';
 import '../../../core/security/app_lock_service.dart';
+import '../../../core/constants/legal_constants.dart';
 final householdNameProvider = StateProvider<String>((ref) => 'Smith Family');
 
 /// S18 — Settings / Profile / Household (doc 09 S18).
@@ -263,26 +264,159 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
 
-          // Sign out
-          const SizedBox(height: 16),
-          Card(
-            color: cs.errorContainer.withValues(alpha: 0.2),
-            child: PressableScale(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () async {
-                await ref.read(authStateNotifierProvider.notifier).logout();
-                if (context.mounted) context.go('/auth/login');
-              },
-              child: ListTile(
-                leading: Icon(Icons.logout_rounded, color: cs.error),
-                title: Text(
-                  'Sign Out',
-                  style: TextStyle(color: cs.error, fontWeight: FontWeight.w700),
+          // Legal & About Section
+          const SizedBox(height: 24),
+          Text(
+            'Legal & About',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurfaceVariant,
                 ),
-              ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: const Text('Privacy Policy'),
+                  subtitle: const Text('Read how your data is protected'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => LegalConstants.showPrivacyPolicyDialog(context),
+                ),
+                const Divider(height: 1, indent: 56),
+                ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: const Text('Terms of Service'),
+                  subtitle: const Text('Terms and conditions of use'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => LegalConstants.showTermsDialog(context),
+                ),
+                const Divider(height: 1, indent: 56),
+                const ListTile(
+                  leading: Icon(Icons.info_outline_rounded),
+                  title: Text('App Version'),
+                  subtitle: Text('1.0.0 (Build 1)'),
+                ),
+              ],
+            ),
+          ),
+
+          // Sign out & Account Deletion
+          const SizedBox(height: 24),
+          Text(
+            'Account Actions',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            color: cs.errorContainer.withValues(alpha: 0.15),
+            child: Column(
+              children: [
+                PressableScale(
+                  borderRadius: BorderRadius.circular(18),
+                  onTap: () async {
+                    await ref.read(authStateNotifierProvider.notifier).logout();
+                    if (context.mounted) context.go('/auth/login');
+                  },
+                  child: ListTile(
+                    leading: Icon(Icons.logout_rounded, color: cs.error),
+                    title: Text(
+                      'Sign Out',
+                      style: TextStyle(color: cs.error, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                if (authState != null && authState.isAuthenticated) ...[
+                  const Divider(height: 1, indent: 56),
+                  PressableScale(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () => _showDeleteAccountDialog(context, ref),
+                    child: ListTile(
+                      leading: Icon(Icons.delete_forever_rounded, color: cs.error),
+                      title: Text(
+                        'Delete Account',
+                        style: TextStyle(color: cs.error, fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(
+                        'Permanently delete your profile and personal data',
+                        style: TextStyle(color: cs.error.withValues(alpha: 0.8), fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 10),
+            Text('Delete Account?'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to permanently delete your account?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'This action is irreversible. All your profile information, authentication credentials, and personal data will be permanently removed.',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.of(dialogCtx).pop();
+              try {
+                await ref.read(authStateNotifierProvider.notifier).deleteAccount();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Account permanently deleted.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  context.go('/auth/login');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to delete account: $e'),
+                      backgroundColor: Colors.red,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Delete Permanently'),
+          ),
         ],
       ),
     );

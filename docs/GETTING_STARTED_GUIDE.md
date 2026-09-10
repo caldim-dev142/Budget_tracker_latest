@@ -8,6 +8,7 @@ Ensure your development machine has the following tools installed:
 - **Node.js**: `v18.x` or `v20.x` LTS
 - **Package Managers**: `npm` or `pnpm`
 - **Database**: Local PostgreSQL 15+ or a cloud [Supabase](https://supabase.com) project
+- **Python**: Python 3.9+ with `pillow` (for icon generation script)
 - **IDE**: VS Code (with Flutter/Dart & Prisma extensions) or Android Studio
 
 ---
@@ -20,13 +21,13 @@ From the repository root:
 flutter pub get
 ```
 
-### Step 2: Run Code Generation (Riverpod, Drift, Freezed)
-Whenever modifying entities, Drift tables, or Riverpod `@riverpod` annotations, run `build_runner`:
+### Step 2: Run Code Generation (Riverpod, Drift)
+Whenever modifying Drift tables or Riverpod `@riverpod` annotations, run `build_runner`:
 ```bash
 dart run build_runner build --delete-conflicting-outputs
 ```
 
-To run continuous code-generation while developing:
+To run continuous code generation while developing:
 ```bash
 dart run build_runner watch --delete-conflicting-outputs
 ```
@@ -67,50 +68,65 @@ npm install
 ```
 
 ### Step 3: Configure Environment Variables
-Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
-```
-Ensure your `DATABASE_URL` is set to a valid PostgreSQL instance:
+Create a `backend/.env` file:
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/budget_tracker?schema=public"
+FIREBASE_PROJECT_ID="your-firebase-project-id"
 JWT_SECRET="your-super-secure-jwt-secret-key-change-me"
-PORT=3000
+PORT=3001
 ```
 
-### Step 4: Apply Database Schema & Migrations
+### Step 4: Apply Database Schema
 ```bash
-# Push Prisma schema directly to your database
+# Push Prisma schema directly to your PostgreSQL database
 npx prisma db push
-
-# (Alternatively) Run standard migrations
-npx prisma migrate dev --name init
 ```
 
 ### Step 5: Start the Development Server
 ```bash
-# Start NestJS in watch mode
+# Start NestJS in watch mode (runs on http://localhost:3001)
 npm run start:dev
 ```
-The server will start at `http://localhost:3000`.
 
 ---
 
-## 4. App Branding & Asset Generation
+## 4. Connecting the Mobile App to Local Backend
 
-To regenerate launcher icons across Android (`mipmap-*`), iOS (`AppIcon.appiconset`), macOS, Windows (`.ico`), and Web from the master logo:
+1. Find your development machine's local Wi-Fi IP address (e.g. `192.168.1.50`).
+2. Open the Flutter app on your mobile device (must be on the **same Wi-Fi network**).
+3. Navigate to **Settings → Server Connection → Backend Server URL**.
+4. Enter: `http://192.168.1.50:3001`
+5. Tap **Test Connection** to verify network reachability.
 
+---
+
+## 5. Useful Helper Scripts
+
+### Icon Generator (Cross-Platform)
+To regenerate all application icons across Android (`mipmap-*`), iOS (`AppIcon.appiconset`), macOS, Windows (`.ico`), and Web:
 ```bash
-# Ensure Pillow is installed: pip install pillow
+# Install Pillow if not already present: pip install pillow
 python scripts/generate_app_icons.py
 ```
 
+### Backend Database Utilities
+From the `backend/` directory:
+```bash
+# Prune legacy or duplicate default accounts
+npx ts-node scripts/cleanup_default_accounts.ts
+
+# Wipe all data for a clean development slate
+npx ts-node scripts/clear_all_data.ts
+```
+
 ---
 
-## 5. Setting Up Supabase (Alternative)
+## 6. Building Production Releases
 
-If you are using Supabase directly:
-1. Open the Supabase SQL Editor for your project.
-2. Copy and execute the contents of [supabase_schema.sql](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/supabase_schema.sql).
-3. Copy your project's PostgreSQL connection string and paste it into `backend/.env` under `DATABASE_URL`.
-
+### Building Android Release APK
+```bash
+flutter clean
+flutter pub get
+flutter build apk --release
+# Output: build/app/outputs/flutter-apk/app-release.apk
+```

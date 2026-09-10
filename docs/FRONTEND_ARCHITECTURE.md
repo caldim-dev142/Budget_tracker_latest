@@ -12,10 +12,11 @@ lib/
 │   ├── constants/             # Seed data, default categories, app constants
 │   ├── network/               # Dio HTTP client, interceptors, auth token handling
 │   ├── router/                # GoRouter route definitions and auth guards
-│   ├── security/              # App lock, biometric auth, password hashing
-│   ├── services/              # Sync engine, connectivity listeners, export services
-│   ├── theme/                 # FluidMotion animations, dark/light palette, typography
-│   └── utils/                 # Money formatter, date helpers, CSV exporter
+│   ├── security/              # AppLockService, LockGate, SecureStore, password hashing
+│   ├── services/              # SyncService, AppInitService, export services
+│   ├── theme/                 # FluidMotion animations, Material 3 teal palette, typography
+│   ├── utils/                 # Money, month, category icons, timezone converters, CSV exporter
+│   └── widgets/               # NavShell, global FAB, LockGate, shared primitives
 ├── data/                      # Local and remote persistence layer
 │   ├── local/                 # Drift SQLite database (AppDatabase) and DAOs
 │   └── remote/                # REST API clients, DTOs, and sync endpoints
@@ -25,7 +26,7 @@ lib/
 │   └── usecases/              # Use-cases (AddEntry, CloseMonth, ReconcileMonth, etc.)
 ├── features/                  # 15 domain-focused feature modules
 │   ├── accounts/              # Bank & cash accounts management
-│   ├── auth/                  # Authentication, login, splash, guest access
+│   ├── auth/                  # Authentication, login, splash, guest access, session state
 │   ├── borrow_lending/        # Informal loans, peer lending, receivables
 │   ├── budget/                # Monthly category budget vs. actuals
 │   ├── cards/                 # Credit card statements and balance tracking
@@ -35,9 +36,9 @@ lib/
 │   ├── onboarding/            # First-time household setup wizard
 │   ├── planning/              # Forward multi-month forecasting, planned bills
 │   ├── protection/            # Sinking funds, insurance, emergency buffers
-│   ├── reports/               # Charts, trend analytics, category breakdown
+│   ├── reports/               # Charts, trend analytics, category breakdown, plan sliders
 │   ├── saving/                # Retirement, children, and custom savings goals
-│   ├── settings/              # App preferences, theme switcher, data export
+│   ├── settings/              # App preferences, household manager, theme, timezone, export
 │   └── transactions/          # Add transaction, custom amount keypad, history
 └── shared/                    # Reusable atomic widgets and UI primitives
     └── widgets/               # MoneyText, AmountKeypad, MonthSwitcher, SkeletonLoader
@@ -49,9 +50,9 @@ lib/
 
 The application uses **Riverpod 2.5+** with code generation (`riverpod_generator`):
 
-- **Data Access via DAOs**: DAOs are injected via Riverpod providers.
-- **AsyncValue Handling**: UI widgets utilize `.when(data: ..., loading: ..., error: ...)` for robust UI states.
-- **Reactive StreamProviders**: Auto-updating streams from SQLite Drift tables keep the UI perfectly in sync whenever transactions are created or updated.
+- **Data Access via DAOs**: DAOs are injected via Riverpod providers (`ref.watch(entryDaoProvider)`).
+- **AsyncValue Handling**: UI widgets utilize `.when(data: ..., loading: ..., error: ...)` for robust, reactive UI states.
+- **Reactive StreamProviders**: Auto-updating streams from SQLite Drift tables keep the UI perfectly in sync whenever transactions or balances change.
 
 ```dart
 // Example: Reactive Stream Provider for Month Entries
@@ -66,10 +67,10 @@ Stream<List<Entry>> monthEntries(MonthEntriesRef ref, YearMonth month) {
 
 ## 3. Local Persistence with Drift (SQLite)
 
-Local offline storage is managed by [AppDatabase](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/app_database.dart) using SQLite.
+Local offline storage is managed by [AppDatabase](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/app_database.dart) using SQLite (`drift` and `sqlite3_flutter_libs`).
 
 ### Key DAOs (Data Access Objects):
-1. **[AccountDao](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/daos/account_dao.dart)**: Bank accounts, liquid cash, current balances.
+1. **[AccountDao](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/daos/account_dao.dart)**: Bank accounts, liquid cash, and verified balances.
 2. **[CategoryDao](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/daos/category_dao.dart)**: Taxonomy of ~141 categories, group codes, and `isDeduction` flags.
 3. **[EntryDao](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/daos/entry_dao.dart)**: Core financial ledger entries (income, expense, adjustment, transfer).
 4. **[SinkingFundDao](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/data/local/daos/sinking_fund_dao.dart)**: Sinking funds, monthly reserves, and movement logs.
@@ -81,46 +82,76 @@ Local offline storage is managed by [AppDatabase](file:///c:/Users/USER/Desktop/
 
 ---
 
-## 4. Offline Synchronization Pipeline
+## 4. Multi-Entity Offline Synchronization Pipeline
+
+The [SyncService](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/core/services/sync_service.dart) provides a robust bidirectional sync mechanism:
 
 ```mermaid
 sequenceDiagram
     participant User as User
     participant UI as Flutter UI
-    participant DAO as Drift SQLite DAO
-    participant Queue as Sync Queue Table
+    participant DAO as Drift SQLite
     participant Sync as SyncService
     participant Backend as NestJS API (/sync/batch)
 
-    User->>UI: Add Expense ₹500
-    UI->>DAO: insertEntry(entry)
-    DAO->>Queue: enqueueOp(CREATE, 'entries', id, payload)
-    UI->>User: Instant UI Update (Optimistic)
+    User->>UI: Mutate Data (e.g. Add Entry / Edit Budget)
+    UI->>DAO: Write directly to SQLite (Instant UI update)
     
-    Note over Sync: Network Check / Online Trigger
-    Sync->>Queue: fetchPendingOperations()
-    Sync->>Backend: POST /sync/batch (Batch of operations)
-    Backend-->>Sync: 200 OK (Acknowledge IDs & Server mutations)
-    Sync->>Queue: markAsSynced(operationIds)
+    Note over Sync: Background / Manual / Online Trigger
+    Sync->>DAO: Collect all entities (Categories, Accounts, Cards, Bills, Goals, Funds, Budgets, Entries)
+    Sync->>Backend: POST /sync/batch (Comprehensive multi-entity payload)
+    Backend-->>Sync: 200 OK (Acknowledge & Return Remote Entities)
+    Sync->>DAO: Merge remote changes into Drift SQLite
 ```
 
+### Synchronized Entities:
+1. **Categories**: System & custom category taxonomy.
+2. **Accounts**: Cash & bank account balances.
+3. **Credit Cards & Card Transactions**: Credit card balances and statements.
+4. **Planned Bills**: Future payables and payment tracking.
+5. **Receivables**: Peer lending and informal loans.
+6. **Saving Goals & Goal Contributions**: Multi-bucket savings tracking.
+7. **Sinking Funds & Fund Movements**: Protection reserve allocations.
+8. **Budgets**: Category-level monthly spending limits.
+9. **Entries**: Main double-entry financial ledger records.
+
 ---
 
-## 5. Reusable UI Primitives & Design System
+## 5. Security & App Lock Architecture
 
-The application incorporates a custom design language:
+The app includes native device-level authentication:
 
-- **`MoneyText`**: Custom animated number ticker utilizing `TweenAnimationBuilder` to smoothly transition monetary amounts without layout jumps.
-- **`AmountKeypad`**: Custom in-app financial numpad with instant addition/calculation capabilities for rapid one-handed transaction logging.
-- **`MonthSwitcher`**: Horizontal gesture-driven month selector facilitating instant historical and forward navigation.
-- **`FluidMotion`**: Curated animation curves and duration tokens ensuring consistent micro-interactions across screen transitions and bottom sheets.
-- **`SkeletonLoader`**: Shimmer skeleton placeholder widgets for graceful loading states.
+- **[AppLockService](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/core/security/app_lock_service.dart)**: Interacts with `local_auth` to authenticate users via device credentials (Fingerprint, Face ID, PIN, pattern, password).
+- **[LockGate](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/core/widgets/lock_gate.dart)**: App-level lifecycle wrapper widget that intercepts Flutter lifecycle state changes (`AppLifecycleState.paused` / `resumed`) and enforces an authentication lock screen after configurable timeout intervals.
+- **[SecureStore](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/core/security/secure_store.dart)**: Encrypted keychain/keystore storage via `flutter_secure_storage` for JWT tokens, active household IDs, and lock configuration flags.
 
 ---
 
-## 6. Household Management & Multi-User State
+## 6. Semantic Category Icon Engine
 
-- **[auth_providers.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/features/auth/providers/auth_providers.dart)**: Manages active user authentication session, token persistence (`flutter_secure_storage`), active household ID, and dynamic household switching.
-- **[settings_screen.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/features/settings/presentation/settings_screen.dart)**: Houses household management UI allowing users to view current household members, invite members via shareable Household IDs, create new households, or switch active households.
-- **Cross-Platform Icon Generator**: Automated asset pipeline in [scripts/generate_app_icons.py](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/scripts/generate_app_icons.py) that resizes the master SVG/PNG asset into all requisite iOS, Android (`mipmap-mdpi` to `xxxhdpi`), Windows (`.ico`), and Web icon sets.
+The [category_icons.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/core/utils/category_icons.dart) engine maps category names to Material 3 icons using fuzzy keyword analysis:
 
+- **60+ Semantic Keywords**: Accurately maps terms like "groceries", "dining", "pet", "gym", "electricity", "insurance", "salary", "bonus", "sip", "rent", etc.
+- **Kind-Tinted Colors**:
+  - `income`: Emerald Green (`0xFF10B981`)
+  - `expense` / `spending`: Vibrant Red / Orange (`0xFFEF4444`)
+  - `protection`: Slate Blue (`0xFF3B82F6`)
+  - `saving`: Royal Purple (`0xFF8B5CF6`)
+  - `adjustment`: Amber (`0xFFF59E0B`)
+
+---
+
+## 7. Plan Distribution Customizer in Reports
+
+Located in [report_detail_screen.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/features/reports/presentation/report_detail_screen.dart):
+- Displays interactive ratio sliders for **Spending**, **Saving**, and **Protection**.
+- Features **Lock Toggles**: Users can lock one or two categories while dynamically adjusting the remainder.
+- Calculates live Drift actuals vs. planned budget targets in real time.
+
+---
+
+## 8. Timezone Localization Engine
+
+Located in [timezone_utils.dart](file:///c:/Users/USER/Desktop/caldim%20projects/Budget_tracker_latest/lib/core/utils/timezone_utils.dart):
+- Encapsulates 24 worldwide timezone offsets.
+- Seamlessly converts UTC database timestamps to the user's selected timezone for date group headings, entry logs, and monthly reports.

@@ -1,6 +1,6 @@
 {
-    "name": "budget_tracker",
-    "short_name": "budget_tracker",
+    "name": "CalBudget",
+    "short_name": "CalBudget",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

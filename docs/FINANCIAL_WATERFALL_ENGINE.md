@@ -15,7 +15,7 @@ Floating-point numbers in computers cannot accurately represent decimal currenci
 0.10 + 0.20 = 0.30000000000000004  // ❌ Fatal in accounting
 ```
 
-To eliminate any potential rounding bugs:
+To eliminate rounding bugs:
 - **All financial fields are stored as 64-bit integers in paise** ($1\text{ INR} = 100\text{ paise}$).
 - For example, `₹1,500.50` is stored as `150050`.
 - All additions, subtractions, multiplications, and rollups are strictly integer operations.
@@ -96,7 +96,7 @@ for (final entry in adjustmentEntries) {
 
 ---
 
-### 2. Outflow Components
+## 5. Outflow Components
 
 ### Layer 1: Spending (`spending_paise`)
 Classified into distinct groups:
@@ -127,7 +127,18 @@ Surplus funds deliberately earmarked to carry forward to the next month's openin
 
 ---
 
-## 5. Month-End Reconciliation: Plan vs. Actual
+## 6. Plan Distribution Modeling
+
+In the Reports module, users can configure dynamic cashflow allocation targets:
+- **Spending Target %**: Default ~45–50%
+- **Saving Target %**: Default ~30–35%
+- **Protection Target %**: Default ~15–20%
+- **Lockable Category Sliders**: Allows users to freeze specific percentage allocations while dynamically scaling the remaining categories to maintain a strict 100% total allocation:
+  $$\text{Spending \%} + \text{Saving \%} + \text{Protection \%} = 100\%$$
+
+---
+
+## 7. Month-End Reconciliation: Plan vs. Actual
 
 In the Excel model (formula `Summary!R9 = Total Inward − Total Outward − Total Available`), the system provides a diagnostic reconciliation:
 

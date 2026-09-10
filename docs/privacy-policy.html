@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — CalBudget</title>
+  <style>
+    :root {
+      --primary: #0E7C7B;
+      --primary-dark: #095251;
+      --text-main: #1F2937;
+      --text-muted: #4B5563;
+      --bg: #F9FAFB;
+      --card-bg: #FFFFFF;
+      --border: #E5E7EB;
+    }
+
+    * {
+      box-content: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.7;
+      color: var(--text-main);
+      background-color: var(--bg);
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      padding: 48px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+
+    .header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--primary);
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text-main);
+      margin-bottom: 8px;
+    }
+
+    .effective-date {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary-dark);
+      margin-top: 36px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    p {
+      margin-bottom: 16px;
+      color: var(--text-muted);
+    }
+
+    ul {
+      margin-left: 24px;
+      margin-bottom: 20px;
+      color: var(--text-muted);
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    strong {
+      color: var(--text-main);
+    }
+
+    .highlight-box {
+      background-color: rgba(14, 124, 123, 0.08);
+      border-left: 4px solid var(--primary);
+      padding: 16px 20px;
+      border-radius: 0 8px 8px 0;
+      margin: 24px 0;
+    }
+
+    .highlight-box p {
+      margin-bottom: 0;
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    a {
+      color: var(--primary);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: var(--primary-dark);
+    }
+
+    .footer {
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+      padding-top: 24px;
+      text-align: center;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 16px 8px;
+      }
+      .container {
+        padding: 24px 20px;
+      }
+      h1 {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <div class="brand">💰 CalBudget</div>
+      <h1>Privacy Policy</h1>
+      <div class="effective-date">Last updated: September 10, 2026 • Effective date: September 10, 2026</div>
+    </div>
+
+    <div class="highlight-box">
+      <p><strong>Summary:</strong> CalBudget is built on an offline-first architecture. Your personal finances belong strictly to you. We do not sell, rent, or monetize your transaction data, and we do not display targeted advertisements.</p>
+    </div>
+
+    <h2>1. Introduction</h2>
+    <p>This Privacy Policy explains how <strong>Caldim Products</strong> ("we", "our", or "us") collects, uses, and safeguards information when you use the <strong>CalBudget</strong> mobile application (the "Application" or "App").</p>
+    <p>By using CalBudget, you agree to the collection and use of information in accordance with this policy.</p>
+
+    <h2>2. Information We Collect</h2>
+    <p>To provide personal and household financial planning features, CalBudget processes the following categories of data:</p>
+    <ul>
+      <li><strong>Account Information:</strong> When you register or sign in via Google OAuth or Email, we collect your name, email address, and unique user identifier.</li>
+      <li><strong>Financial Records:</strong> Incomes, expenses, categories, planned bills, credit card records, sinking funds, saving goals, and household budgets that you manually enter into the app.</li>
+      <li><strong>Device & Authentication Security:</strong> Biometric authentication (Fingerprint / Face ID) is processed entirely by your device's native operating system (Android BiometricPrompt / iOS LocalAuthentication). We never access, store, or transmit your raw biometric data.</li>
+    </ul>
+
+    <h2>3. How We Store and Protect Your Data</h2>
+    <ul>
+      <li><strong>Offline-First Local Storage:</strong> All your financial records are stored in an encrypted local database on your mobile device. You can use CalBudget completely offline without an internet connection.</li>
+      <li><strong>Encrypted Synchronization:</strong> When cloud synchronization is enabled, your data is transferred over secure HTTPS/TLS encrypted connections to our PostgreSQL database.</li>
+      <li><strong>Token Security:</strong> Authentication tokens (JWTs) and user session credentials are stored in the Android Keystore / iOS Keychain via Flutter Secure Storage.</li>
+    </ul>
+
+    <h2>4. Data Sharing and Third Parties</h2>
+    <ul>
+      <li><strong>No Sale of Personal Data:</strong> We do <strong>never</strong> sell, trade, or share your financial transactions, budgets, or personal details with third-party advertisers or brokers.</li>
+      <li><strong>Authentication Services:</strong> We use Google Identity Services and Firebase Authentication strictly to verify your identity upon login.</li>
+      <li><strong>Legal Compliance:</strong> We will only disclose your data if legally required to do so by applicable laws, subpoenas, or judicial orders.</li>
+    </ul>
+
+    <h2>5. Household Budget Isolation</h2>
+    <p>If you create or join a shared Household budget:</p>
+    <ul>
+      <li>Financial entries created under the household are shared exclusively with authorized members of that specific household.</li>
+      <li>Users in other households cannot view, access, or modify your household records.</li>
+    </ul>
+
+    <h2>6. Data Retention and Account Deletion</h2>
+    <p>You have full control over your personal data:</p>
+    <ul>
+      <li><strong>In-App Deletion:</strong> You can permanently delete your user account and personal cloud data at any time within the app by navigating to <strong>Settings → Account Actions → Delete Account</strong>.</li>
+      <li><strong>Web-Based Deletion Request:</strong> If you do not have access to the app, you can request account deletion online at: <br>
+        <a href="https://www.caldimproducts.com/calbudget/account-deletion" target="_blank" rel="noopener noreferrer">https://www.caldimproducts.com/calbudget/account-deletion</a>
+      </li>
+      <li>Upon account deletion, your credentials, session tokens, and personal profile are permanently removed from our servers.</li>
+    </ul>
+
+    <h2>7. Children's Privacy</h2>
+    <p>CalBudget is not directed to children under the age of 13. We do not knowingly collect personal information from children under 13.</p>
+
+    <h2>8. Changes to This Privacy Policy</h2>
+    <p>We may update our Privacy Policy periodically. Any changes will be posted on this page with an updated effective date.</p>
+
+    <h2>9. Contact Us</h2>
+    <p>If you have any questions or concerns regarding this Privacy Policy, you can reach us at:</p>
+    <ul>
+      <li><strong>Company:</strong> Caldim Products</li>
+      <li><strong>Email:</strong> <a href="mailto:support@calbudget.app">support@calbudget.app</a></li>
+      <li><strong>Website:</strong> <a href="https://www.caldimproducts.com/calbudget" target="_blank" rel="noopener noreferrer">https://www.caldimproducts.com/calbudget</a></li>
+    </ul>
+
+    <div class="footer">
+      &copy; 2026 Caldim Products. All rights reserved. • <a href="https://www.caldimproducts.com/calbudget/terms" target="_blank">Terms of Service</a>
+    </div>
+  </div>
+
+</body>
+</html>
