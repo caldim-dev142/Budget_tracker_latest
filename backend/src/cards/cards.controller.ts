@@ -2,10 +2,11 @@ import { Controller, Get, Post, Body, Param, UseGuards, Req } from '@nestjs/comm
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CardsService } from './cards.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { HouseholdGuard } from '../auth/guards/household.guard';
 
 @ApiTags('cards')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @Controller('cards')
 export class CardsController {
   constructor(private readonly cardsService: CardsService) {}

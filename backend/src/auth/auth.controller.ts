@@ -5,12 +5,23 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto, LogoutDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Get('health')
+  @ApiOperation({ summary: 'Health and DB connectivity check' })
+  health() {
+    return {
+      status: 'ok',
+      service: 'budget-tracker-backend',
+      timestamp: new Date().toISOString(),
+    };
+  }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -38,23 +49,17 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate refresh token' })
-  refresh(
-    @Body() body: { userId: string; refreshToken: string; family: string },
-  ) {
-    const hash = require('crypto')
-      .createHash('sha256')
-      .update(body.refreshToken)
-      .digest('hex');
-    return this.authService.refresh(body.userId, hash, body.family);
+  refresh(@Body() body: RefreshTokenDto) {
+    // The raw token is passed through; AuthService hashes it exactly once before lookup.
+    return this.authService.refresh(body.userId, body.refreshToken, body.family);
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  logout(@Req() req: any) {
-    const { family } = req.body;
-    return this.authService.logout(req.user.sub, family);
+  logout(@Req() req: any, @Body() body: LogoutDto) {
+    return this.authService.logout(req.user.userId, body?.family);
   }
 
   @Get('me')

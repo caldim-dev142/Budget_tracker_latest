@@ -7,10 +7,11 @@ import '../../../features/dashboard/providers/dashboard_providers.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../data/local/database.dart';
 import '../../../domain/engine/waterfall.dart';
-import '../../../domain/engine/rollover.dart';
 import '../../../domain/entities/month_snapshot.dart';
 import '../../../core/utils/money.dart';
 import '../../auth/providers/auth_providers.dart';
+import '../../../core/services/sync_service.dart';
+import '../../../core/utils/app_feedback.dart';
 
 
 class MoreScreen extends ConsumerStatefulWidget {
@@ -95,7 +96,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
           // Month Close Rollover Section
           PressableScale(
             borderRadius: BorderRadius.circular(18),
-            onTap: () => _showMonthCloseDialog(context, isClosed),
+            onTap: () => _showMonthCloseDialog(isClosed),
             child: Card(
               color: isClosed
                   ? cs.surfaceContainerLowest
@@ -218,83 +219,36 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
     );
   }
 
-  void _showMonthCloseDialog(BuildContext context, bool isClosed) {
+  Future<void> _showMonthCloseDialog(bool isClosed) async {
     if (isClosed) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Month Already Closed'),
-          content: const Text(
-            'This month has already been finalized and rolled over. You can re-open it to adjust entries.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade700),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                final messenger = ScaffoldMessenger.of(context);
-                await _reopenMonth();
-                if (mounted) {
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: const Text('Month re-opened for edits.'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Re-open Month'),
-            ),
-          ],
-        ),
+      final confirm = await AppFeedback.showConfirmDialog(
+        context,
+        title: 'Re-open Month?',
+        message: 'This month has already been finalized and rolled over. Re-opening will allow adjusting entries and recalculating balances.',
+        confirmLabel: 'Re-open Month',
+        isDestructive: false,
       );
+      if (confirm == true && mounted) {
+        await _reopenMonth();
+        if (mounted) {
+          AppFeedback.showSuccess(context, 'Month re-opened for edits.');
+        }
+      }
     } else {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Close Month & Rollover?'),
-          content: const Text(
-            'Closing this month will freeze all actual entries. The remaining balance will roll over as next month\'s opening balance.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                final messenger = ScaffoldMessenger.of(context);
-                final ok = await _closeMonth();
-                if (mounted && ok) {
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: const Text('Month closed & rolled over successfully!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
-                  ref.invalidate(isCurrentMonthClosedProvider);
-                }
-              },
-              child: _isClosing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Confirm & Rollover'),
-            ),
-          ],
-        ),
+      final confirm = await AppFeedback.showConfirmDialog(
+        context,
+        title: 'Close Month & Rollover?',
+        message: 'Closing this month will freeze all actual entries. The remaining balance will roll over as next month\'s opening balance.',
+        confirmLabel: 'Confirm & Rollover',
+        isDestructive: false,
       );
+      if (confirm == true && mounted) {
+        final ok = await _closeMonth();
+        if (mounted && ok) {
+          AppFeedback.showSuccess(context, 'Month closed & rolled over successfully!');
+          ref.invalidate(isCurrentMonthClosedProvider);
+        }
+      }
     }
   }
 
@@ -303,7 +257,6 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
   Future<bool> _closeMonth() async {
     if (_isClosing) return false;
     setState(() => _isClosing = true);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final db = ref.read(appDatabaseProvider);
       final ym = ref.read(selectedMonthProvider);
@@ -375,7 +328,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
         ccOutstandingPaise += card.previousOutstandingPaise + delta;
       }
 
-      final receivables = await db.select(db.receivablesTable).get();
+      final receivables = await (db.select(db.receivablesTable)..where((r) => r.householdId.equals(householdId))).get();
       int returnAwaitedPaise = 0;
       for (final rec in receivables) {
         if (rec.status == 'open') {
@@ -383,7 +336,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
         }
       }
 
-      final plannedBills = await db.select(db.plannedBillsTable).get();
+      final plannedBills = await (db.select(db.plannedBillsTable)..where((b) => b.householdId.equals(householdId))).get();
       int toBePaidPaise = 0;
       for (final bill in plannedBills) {
         if (!bill.isPaid) {
@@ -450,7 +403,10 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
       final int nextOpeningBalance = closingBalance.paise;
       final int nextLastMonthReserves = reservesSetAsidePaise;
 
-      if (existingNext != null) {
+      if (existingNext != null && existingNext.status == 'closed') {
+        // DEF-FIN-05: a closed next month is a frozen statement — re-closing this month must not
+        // rewrite its opening balance / last-month reserves.
+      } else if (existingNext != null) {
         await db.snapshotDao.upsertSnapshot(
           MonthSnapshotsTableCompanion(
             id: Value(existingNext.id),
@@ -494,16 +450,24 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
       ref.invalidate(dashboardProvider((ym, householdId)));
       ref.invalidate(dashboardProvider((nextYm, householdId)));
 
+      // Notify backend asynchronously (fire-and-forget)
+      ref.read(syncServiceProvider).notifyMonthClosed(
+        ymStr,
+        openingBalance: currentOpeningPaise,
+        lastMonthReserves: currentLastReservesPaise,
+        income: netIncomePaise,
+        adjustments: adjustmentsPaise,
+        spending: spendingPaise,
+        protection: protectionPaise,
+        saving: savingPaise,
+        reserves: reservesSetAsidePaise,
+        totalAvailable: totalAvailablePaise,
+      );
+
       return true;
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Failed to close month: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        AppFeedback.showError(context, 'Failed to close month', error: e);
       }
       return false;
     } finally {
@@ -541,6 +505,9 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
     ref.invalidate(isCurrentMonthClosedProvider);
     ref.invalidate(dashboardProvider((ym, householdId)));
     ref.invalidate(dashboardProvider((ym.next, householdId)));
+
+    // Notify backend asynchronously (fire-and-forget)
+    ref.read(syncServiceProvider).notifyMonthReopened(ym.toString());
   }
 }
 

@@ -3,13 +3,15 @@ import 'package:drift/drift.dart' hide Column, Table;
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
 
-import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/local/database.dart';
-import '../../../domain/entities/entry.dart';
 import '../../../core/utils/month.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
+import '../providers/report_filters_provider.dart';
+import '../providers/plan_distribution_lock_provider.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 
 class ReportDetailScreen extends ConsumerStatefulWidget {
   final String reportId;
@@ -76,6 +78,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
   late double _yearlyTotalProtection;
   late double _yearlyTotalAdjustments;
   late double _yearlyTotalReserves;
+  List<AnnualTargetsTableData> _annualTargets = [];
 
   bool _isLoading = true;
 
@@ -94,27 +97,59 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       final db = ref.read(appDatabaseProvider);
       final authState = ref.read(authStateProvider).valueOrNull;
       final householdId = authState?.householdId ?? 'local';
+      final filter = ref.read(reportFilterProvider);
       final ymStr = '${_selectedMonth.year}-${_selectedMonth.month.toString().padLeft(2, '0')}';
       
       // Fetch all entries for this month
-      final entries = await db.entryDao.getMonth(ymStr, householdId: householdId);
+      final rawEntries = await db.entryDao.getMonth(ymStr, householdId: householdId);
       
       // Fetch categories
       final categories = await db.categoryDao.getAllActive(householdId: householdId);
       const monthNamesShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-      // 1. Trends: Fetch data for the last 8 months up to _selectedMonth
+      final catMap = <String, CategoriesTableData>{};
+      for (final c in categories) {
+        catMap[c.id] = c;
+      }
+
+      // Filter predicate based on active ReportFilterState
+      bool entryMatchesFilter(EntriesTableData e) {
+        if (filter.categoryIdFilter != null && e.categoryId != filter.categoryIdFilter) {
+          return false;
+        }
+        final cat = catMap[e.categoryId];
+        if (filter.kindFilter != 'all') {
+          if (e.kind != filter.kindFilter) return false;
+        }
+        if (filter.needOrWantFilter != 'all') {
+          if (cat == null || cat.needOrWant != filter.needOrWantFilter) return false;
+        }
+        return true;
+      }
+
+      final entries = rawEntries.where(entryMatchesFilter).toList();
+
+      // Build deduction category ID set for correct adjustment sign semantics.
+      // Rule (source of truth): isDeduction: true → outflow; false → inflow.
+      final deductionCategoryIds = <String>{};
+      for (final c in categories) {
+        if (c.isDeduction) deductionCategoryIds.add(c.id);
+      }
+
+      // 1. Trends: Fetch data for the selected horizon up to _selectedMonth (household-scoped)
+      final horizon = filter.timeHorizonMonths;
       _trendsIncome = [];
       _trendsSpending = [];
       _trendsMonthLabels = [];
       int activeMonthsCount = 0;
 
-      for (int i = 7; i >= 0; i--) {
+      for (int i = horizon - 1; i >= 0; i--) {
         final m = DateTime(_selectedMonth.year, _selectedMonth.month - i);
         final ymVal = '${m.year}-${m.month.toString().padLeft(2, '0')}';
         _trendsMonthLabels.add(monthNamesShort[m.month - 1]);
 
-        final mEntries = await db.entryDao.getMonth(ymVal);
+        final rawMEntries = await db.entryDao.getMonth(ymVal, householdId: householdId);
+        final mEntries = rawMEntries.where(entryMatchesFilter).toList();
         
         double mIncome = 0;
         double mSpending = 0;
@@ -127,7 +162,12 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
           } else if (e.kind == 'spending') {
             mSpending += val;
           } else if (e.kind == 'adjustment') {
-            if (val > 0) mIncome += val; else mSpending += val.abs();
+            // isDeduction: true → outflow (spending); false → inflow (income)
+            if (deductionCategoryIds.contains(e.categoryId)) {
+              mSpending += val;
+            } else {
+              mIncome += val;
+            }
           }
         }
         if (mEntries.isNotEmpty) {
@@ -139,21 +179,19 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
 
       final sumIncome = _trendsIncome.isEmpty ? 0.0 : _trendsIncome.reduce((a, b) => a + b);
       final sumSpending = _trendsSpending.isEmpty ? 0.0 : _trendsSpending.reduce((a, b) => a + b);
-      final divisor = activeMonthsCount > 0 ? activeMonthsCount : 8;
+      final divisor = activeMonthsCount > 0 ? activeMonthsCount : horizon;
       _avgIncome = sumIncome / divisor;
       _avgSpending = sumSpending / divisor;
       _netSavings = _avgIncome - _avgSpending;
 
-      // 2. Category Breakdown (strictly for spending entries)
-      final catMap = <String, String>{};
-      for (final c in categories) {
-        catMap[c.id] = c.name;
-      }
-
+      // 2. Category Breakdown (strictly for matching entries)
       final categoryTotals = <String, double>{};
       for (final e in entries) {
-        if (e.kind == 'spending') {
-          final catName = catMap[e.categoryId] ?? 'Uncategorized';
+        final isMatch = filter.kindFilter == 'all'
+            ? e.kind == 'spending'
+            : e.kind == filter.kindFilter;
+        if (isMatch) {
+          final catName = catMap[e.categoryId]?.name ?? 'Uncategorized';
           categoryTotals[catName] = (categoryTotals[catName] ?? 0.0) + (e.amountPaise / 100.0);
         }
       }
@@ -223,23 +261,42 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
         _savingPlanPct = ((savingBudget / totalBudget) * 100).roundToDouble();
         _protectionPlanPct = (100.0 - _spendingPlanPct - _savingPlanPct).clamp(0.0, 100.0);
       } else {
-        _spendingPlanPct = 45.0;
-        _savingPlanPct = 35.0;
-        _protectionPlanPct = 20.0;
+        // No budget data: show zero allocation (no synthetic defaults)
+        _spendingPlanPct = 0.0;
+        _savingPlanPct = 0.0;
+        _protectionPlanPct = 0.0;
       }
       _initialSpendingBudgetPct = _spendingPlanPct;
       _initialSavingBudgetPct = _savingPlanPct;
       _initialProtectionBudgetPct = _protectionPlanPct;
 
-      // 4. Cash Flow: Inflow vs Outflow for the last 6 months
+      // Restore locked percentages from PlanDistributionLockProvider
+      final lockState = ref.read(planDistributionLockProvider(householdId));
+      _spendingLocked = lockState.spendingLocked;
+      _savingLocked = lockState.savingLocked;
+      _protectionLocked = lockState.protectionLocked;
+
+      if (_spendingLocked && lockState.lockedSpendingPct != null) {
+        _spendingPlanPct = lockState.lockedSpendingPct!;
+      }
+      if (_savingLocked && lockState.lockedSavingPct != null) {
+        _savingPlanPct = lockState.lockedSavingPct!;
+      }
+      if (_protectionLocked && lockState.lockedProtectionPct != null) {
+        _protectionPlanPct = lockState.lockedProtectionPct!;
+      }
+
+      // 4. Cash Flow: Inflow vs Outflow for the selected horizon (household-scoped)
+      final cfHorizon = filter.timeHorizonMonths.clamp(3, 12);
       _cashFlowIn = [];
       _cashFlowOut = [];
       _cashFlowMonthLabels = [];
-      for (int i = 5; i >= 0; i--) {
+      for (int i = cfHorizon - 1; i >= 0; i--) {
         final m = DateTime(_selectedMonth.year, _selectedMonth.month - i);
         final ymVal = '${m.year}-${m.month.toString().padLeft(2, '0')}';
         _cashFlowMonthLabels.add(monthNamesShort[m.month - 1]);
-        final mEntries = await db.entryDao.getMonth(ymVal);
+        final rawMEntries = await db.entryDao.getMonth(ymVal, householdId: householdId);
+        final mEntries = rawMEntries.where(entryMatchesFilter).toList();
         
         double mIn = 0;
         double mOut = 0;
@@ -252,7 +309,12 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
           } else if (e.kind == 'spending' || e.kind == 'saving' || e.kind == 'protection') {
             mOut += val;
           } else if (e.kind == 'adjustment') {
-            if (val > 0) mIn += val; else mOut += val.abs();
+            // isDeduction: true → outflow; false → inflow
+            if (deductionCategoryIds.contains(e.categoryId)) {
+              mOut += val;
+            } else {
+              mIn += val;
+            }
           }
         }
         _cashFlowIn.add(mIn);
@@ -261,33 +323,62 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       _totalInflow = _cashFlowIn.isEmpty ? 0.0 : _cashFlowIn.reduce((a, b) => a + b);
       _totalOutflow = _cashFlowOut.isEmpty ? 0.0 : _cashFlowOut.reduce((a, b) => a + b);
 
-      // 5. Goal Progress
-      final funds = await db.fundDao.getAllActive(householdId: householdId);
+      // 5. Goal Progress: use SavingGoals with real targetPaise (not sinking funds)
+      final goals = await db.goalDao.getAllActive(householdId: householdId);
       _goalsList = [];
       double totalTarget = 0;
       double totalSaved = 0;
-      int fundColorIdx = 0;
-      for (final f in funds) {
-        final movements = await db.fundDao.getMovements(f.id);
-        final contributions = movements.where((m) => m.type == 'contribution').fold<int>(0, (s, m) => s + m.amountPaise);
-        final withdrawals = movements.where((m) => m.type == 'withdrawal').fold<int>(0, (s, m) => s + m.amountPaise);
-        final currentBal = (f.openingReservePaise + contributions - withdrawals) / 100.0;
-        
-        final target = f.openingReservePaise > 0 ? (f.openingReservePaise * 1.5) / 100.0 : 50000.0;
-        totalTarget += target;
+      int goalColorIdx = 0;
+      for (final g in goals) {
+        // Sum all contributions for this goal from goalContributionsTable
+        final contributions = await (db.select(db.goalContributionsTable)
+              ..where((c) => c.goalId.equals(g.id)))
+            .get();
+        final totalContributions = contributions.fold<int>(0, (s, c) => s + c.amountPaise);
+        final currentBal = totalContributions / 100.0;
+
+        // Real target from DB; null means no target set yet
+        final target = g.targetPaise != null ? g.targetPaise! / 100.0 : 0.0;
+        if (target > 0) totalTarget += target;
         totalSaved += currentBal;
 
         _goalsList.add({
-          'name': f.name,
+          'name': g.name,
           'target': target,
           'saved': currentBal,
           'progress': target > 0 ? (currentBal / target).clamp(0.0, 1.0) : 0.0,
-          'color': _getCategoryColor(fundColorIdx++),
+          'color': _getCategoryColor(goalColorIdx++),
         });
       }
-      _totalGoalTarget = totalTarget > 0 ? totalTarget : 100000.0;
+      _totalGoalTarget = totalTarget;
       _totalGoalSaved = totalSaved;
-      _savingsTrajectory = List.generate(8, (index) => 120.0 + index * 10);
+
+      // Savings trajectory: cumulative saving from closed monthly snapshots (real data only)
+      // Uses the last horizon months' savingPaise from monthSnapshot where status = 'closed'.
+      final trajectoryMonths = <String>[];
+      for (int i = horizon - 1; i >= 0; i--) {
+        final m = DateTime(_selectedMonth.year, _selectedMonth.month - i);
+        trajectoryMonths.add('${m.year}-${m.month.toString().padLeft(2, '0')}');
+      }
+      final trajectorySnaps = await (db.select(db.monthSnapshotsTable)
+            ..where((s) =>
+                s.householdId.equals(householdId) &
+                s.status.equals('closed')))
+          .get();
+      double cumulativeSaving = 0;
+      _savingsTrajectory = trajectoryMonths.map((ym) {
+        final snap = trajectorySnaps.where((s) => s.yearMonth == ym).firstOrNull;
+        if (snap != null) cumulativeSaving += snap.savingPaise / 100.0;
+        return cumulativeSaving;
+      }).toList();
+      // Update trajectory month labels for the chart
+      _trendsMonthLabels = trajectoryMonths
+          .map((ym) {
+            final parts = ym.split('-');
+            final mIdx = int.parse(parts[1]) - 1;
+            return monthNamesShort[mIdx];
+          })
+          .toList();
 
       // 6. Yearly Summary — income, spending, saving, protection, adjustments, reserves
       _yearlyMonths = [];
@@ -299,7 +390,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       for (int i = 0; i < 12; i++) {
         final ymVal = '${_selectedMonth.year}-${(i + 1).toString().padLeft(2, '0')}';
-        final mEntries = await db.entryDao.getMonth(ymVal);
+        final mEntries = await db.entryDao.getMonth(ymVal, householdId: householdId);
 
         // Also check MonthSnapshot for closed months — use snapshot reserves if available
         final snapshot = await (db.select(db.monthSnapshotsTable)
@@ -328,7 +419,8 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
             case 'protection':
               mProt += val;
             case 'adjustment':
-              mAdj += val; // signed
+              // isDeduction: true → outflow (negative adj); false → inflow (positive adj)
+              mAdj += deductionCategoryIds.contains(e.categoryId) ? -val : val;
           }
         }
 
@@ -367,6 +459,11 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       _yearlyTotalProtection = yearlyTotalProt;
       _yearlyTotalAdjustments = yearlyTotalAdj;
       _yearlyTotalReserves = yearlyTotalRes;
+
+      // Annual Targets (for the selected year's household)
+      _annualTargets = await (db.select(db.annualTargetsTable)
+            ..where((t) => t.householdId.equals(householdId)))
+          .get();
     } catch (_) {
       _trendsIncome = List.filled(8, 0.0);
       _trendsSpending = List.filled(8, 0.0);
@@ -398,6 +495,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       _yearlyTotalProtection = 0.0;
       _yearlyTotalAdjustments = 0.0;
       _yearlyTotalReserves = 0.0;
+      _annualTargets = [];
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -433,6 +531,210 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
         _ => 'Annual Summary',
       };
 
+  void _showFilterSheet(BuildContext context, ColorScheme cs, String householdId) async {
+    final db = ref.read(appDatabaseProvider);
+    final categories = await db.categoryDao.getAllActive(householdId: householdId);
+    if (!context.mounted) return;
+
+    final currentFilter = ref.read(reportFilterProvider);
+    int selectedHorizon = currentFilter.timeHorizonMonths;
+    String selectedKind = currentFilter.kindFilter;
+    String selectedNeedOrWant = currentFilter.needOrWantFilter;
+    String? selectedCategory = currentFilter.categoryIdFilter;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final isFiltered = selectedHorizon != 8 ||
+              selectedKind != 'all' ||
+              selectedNeedOrWant != 'all' ||
+              selectedCategory != null;
+
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.tune_rounded, size: 20, color: cs.primary),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Report Filters',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isFiltered)
+                        TextButton(
+                          onPressed: () {
+                            setModalState(() {
+                              selectedHorizon = 8;
+                              selectedKind = 'all';
+                              selectedNeedOrWant = 'all';
+                              selectedCategory = null;
+                            });
+                          },
+                          child: const Text('Reset All'),
+                        ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+
+                  // 1. Time Horizon
+                  const Text(
+                    'Time Horizon',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [3, 6, 8, 12].map((m) {
+                      final label = m == 12 ? '1 Year' : '$m Months';
+                      final isSelected = selectedHorizon == m;
+                      return ChoiceChip(
+                        label: Text(label),
+                        selected: isSelected,
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedHorizon = m);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 2. Category Kind
+                  const Text(
+                    'Transaction Kind',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ('all', 'All Kinds'),
+                      ('spending', 'Spending'),
+                      ('saving', 'Saving'),
+                      ('protection', 'Protection'),
+                    ].map((k) {
+                      final isSelected = selectedKind == k.$1;
+                      return ChoiceChip(
+                        label: Text(k.$2),
+                        selected: isSelected,
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedKind = k.$1);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 3. Need vs Want
+                  const Text(
+                    'Need vs Want',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ('all', 'All'),
+                      ('need', 'Needs Only'),
+                      ('want', 'Wants Only'),
+                    ].map((nw) {
+                      final isSelected = selectedNeedOrWant == nw.$1;
+                      return ChoiceChip(
+                        label: Text(nw.$2),
+                        selected: isSelected,
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedNeedOrWant = nw.$1);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 4. Specific Category
+                  const Text(
+                    'Category',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHigh.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String?>(
+                        value: selectedCategory,
+                        isExpanded: true,
+                        hint: const Text('All Categories'),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('All Categories'),
+                          ),
+                          ...categories.map(
+                            (c) => DropdownMenuItem<String?>(
+                              value: c.id,
+                              child: Text(c.name),
+                            ),
+                          ),
+                        ],
+                        onChanged: (val) => setModalState(() => selectedCategory = val),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Apply Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () {
+                        ref.read(reportFilterProvider.notifier).applyFilters(
+                              timeHorizonMonths: selectedHorizon,
+                              kindFilter: selectedKind,
+                              needOrWantFilter: selectedNeedOrWant,
+                              categoryIdFilter: selectedCategory,
+                            );
+                        Navigator.pop(ctx);
+                        _loadRealData();
+                      },
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: const Text('Apply Filters', style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<YearMonth>(selectedMonthProvider, (prev, next) {
@@ -446,6 +748,9 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
 
     final cs = Theme.of(context).colorScheme;
     final String title = _getReportTitle(widget.reportId);
+    final filterState = ref.watch(reportFilterProvider);
+    final householdId =
+        ref.watch(authStateProvider).valueOrNull?.householdId ?? 'local';
 
     return Scaffold(
       appBar: AppBar(
@@ -454,9 +759,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
           IconButton(
             icon: const Icon(Icons.share_outlined),
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Sharing $title report summary...')),
-              );
+              AppFeedback.showInfo(context, 'Sharing $title report summary...');
             },
             tooltip: 'Share',
           ),
@@ -513,19 +816,43 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                 ),
                 const Spacer(),
                 GestureDetector(
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Report filter options coming soon!')),
-                    );
-                  },
+                  onTap: () => _showFilterSheet(context, cs, householdId),
                   child: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: cs.surfaceContainerHigh.withValues(alpha: 0.6),
+                      color: filterState.isFiltered
+                          ? cs.primary.withValues(alpha: 0.15)
+                          : cs.surfaceContainerHigh.withValues(alpha: 0.6),
                       shape: BoxShape.circle,
-                      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: filterState.isFiltered
+                            ? cs.primary
+                            : cs.outlineVariant.withValues(alpha: 0.3),
+                      ),
                     ),
-                    child: const Icon(Icons.tune_rounded, size: 18),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(
+                          Icons.tune_rounded,
+                          size: 18,
+                          color: filterState.isFiltered ? cs.primary : cs.onSurface,
+                        ),
+                        if (filterState.isFiltered)
+                          Positioned(
+                            top: -2,
+                            right: -2,
+                            child: Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: cs.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -1283,10 +1610,20 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
           }
         }
       }
+
+      final authState = ref.read(authStateProvider).valueOrNull;
+      final householdId = authState?.householdId ?? 'local';
+      final lockNotifier = ref.read(planDistributionLockProvider(householdId).notifier);
+      if (_spendingLocked) lockNotifier.setLockedValue('spending', _spendingPlanPct);
+      if (_savingLocked) lockNotifier.setLockedValue('saving', _savingPlanPct);
+      if (_protectionLocked) lockNotifier.setLockedValue('protection', _protectionPlanPct);
     });
   }
 
   void _setPlanPreset(double spend, double save, double protect) {
+    final authState = ref.read(authStateProvider).valueOrNull;
+    final householdId = authState?.householdId ?? 'local';
+    ref.read(planDistributionLockProvider(householdId).notifier).unlockAll();
     setState(() {
       _spendingLocked = false;
       _savingLocked = false;
@@ -1298,7 +1635,7 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
   }
 
   void _promptDirectPct(String layer, String label, double currentVal) {
-    final ctrl = TextEditingController(text: currentVal.toStringAsFixed(0));
+    final ctrl = TextEditingController(text: currentVal > 0 ? currentVal.toStringAsFixed(0) : '');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1306,10 +1643,12 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
         title: Text('Set $label Target %'),
         content: TextField(
           controller: ctrl,
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [AppInputFormatters.positiveDecimal()],
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'Target Percentage',
+            hintText: 'e.g. 50',
             suffixText: '%',
           ),
         ),
@@ -1318,9 +1657,11 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
           FilledButton(
             onPressed: () {
               final val = double.tryParse(ctrl.text.trim());
-              if (val != null) {
-                _adjustPlanPct(layer, val);
+              if (val == null || val < 0 || val > 100) {
+                AppFeedback.showWarning(ctx, 'Please enter a valid percentage between 0 and 100.');
+                return;
               }
+              _adjustPlanPct(layer, val);
               Navigator.pop(ctx);
             },
             child: const Text('Apply'),
@@ -1335,6 +1676,9 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
     if (_segmentedIndex == 1) {
       return _buildNeedsWantsStatementTable(context, cs);
     }
+    final authState = ref.watch(authStateProvider).valueOrNull;
+    final householdId = authState?.householdId ?? 'local';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1593,7 +1937,11 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                   color: const Color(0xFFEF4444),
                   value: _spendingPlanPct,
                   isLocked: _spendingLocked,
-                  onLockToggle: () => setState(() => _spendingLocked = !_spendingLocked),
+                  onLockToggle: () {
+                    final notifier = ref.read(planDistributionLockProvider(householdId).notifier);
+                    notifier.toggleLock('spending', _spendingPlanPct);
+                    setState(() => _spendingLocked = !_spendingLocked);
+                  },
                   onStep: (delta) => _adjustPlanPct('spending', _spendingPlanPct + delta),
                   onDirectInput: () => _promptDirectPct('spending', 'Spending', _spendingPlanPct),
                   onChanged: (v) => _adjustPlanPct('spending', v),
@@ -1605,7 +1953,11 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                   color: const Color(0xFF10B981),
                   value: _savingPlanPct,
                   isLocked: _savingLocked,
-                  onLockToggle: () => setState(() => _savingLocked = !_savingLocked),
+                  onLockToggle: () {
+                    final notifier = ref.read(planDistributionLockProvider(householdId).notifier);
+                    notifier.toggleLock('saving', _savingPlanPct);
+                    setState(() => _savingLocked = !_savingLocked);
+                  },
                   onStep: (delta) => _adjustPlanPct('saving', _savingPlanPct + delta),
                   onDirectInput: () => _promptDirectPct('saving', 'Saving', _savingPlanPct),
                   onChanged: (v) => _adjustPlanPct('saving', v),
@@ -1617,7 +1969,11 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                   color: const Color(0xFFF59E0B),
                   value: _protectionPlanPct,
                   isLocked: _protectionLocked,
-                  onLockToggle: () => setState(() => _protectionLocked = !_protectionLocked),
+                  onLockToggle: () {
+                    final notifier = ref.read(planDistributionLockProvider(householdId).notifier);
+                    notifier.toggleLock('protection', _protectionPlanPct);
+                    setState(() => _protectionLocked = !_protectionLocked);
+                  },
                   onStep: (delta) => _adjustPlanPct('protection', _protectionPlanPct + delta),
                   onDirectInput: () => _promptDirectPct('protection', 'Protection', _protectionPlanPct),
                   onChanged: (v) => _adjustPlanPct('protection', v),
@@ -1832,12 +2188,12 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
                           showTitles: true,
                           interval: 1,
                           getTitlesWidget: (value, _) {
-                            final months = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
+                            // Use the trend month labels which now reflect real months
                             final idx = value.toInt();
-                            if (idx >= 0 && idx < months.length) {
+                            if (idx >= 0 && idx < _trendsMonthLabels.length) {
                               return Padding(
                                 padding: const EdgeInsets.only(top: 8.0),
-                                child: Text(months[idx], style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant, fontWeight: FontWeight.w600)),
+                                child: Text(_trendsMonthLabels[idx], style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant, fontWeight: FontWeight.w600)),
                               );
                             }
                             return const Text('');
@@ -1869,7 +2225,17 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        Text('Sinking Funds & Savings Goals', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Sinking Funds & Savings Goals', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            if (_totalGoalTarget > 0)
+              Text(
+                'Total: ₹${_totalGoalSaved.toStringAsFixed(0)} / ₹${_totalGoalTarget.toStringAsFixed(0)}',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.primary),
+              ),
+          ],
+        ),
         const SizedBox(height: 12),
         Column(
           children: List.generate(_goalsList.length, (i) {
@@ -1937,6 +2303,106 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Annual Targets vs YTD Actuals ──────────────────────────────────
+        if (_annualTargets.isNotEmpty) ...[
+          Text(
+            'Annual Targets vs YTD Actuals',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${_selectedMonth.year} • ${_annualTargets.length} target${_annualTargets.length == 1 ? '' : 's'} set',
+            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          ...(_annualTargets.map((t) {
+            final isIncome = t.type == 'income';
+            final targetAmt = t.targetPaise / 100.0;
+            final actualAmt = isIncome ? totalIncome : totalSpending;
+            final pct = targetAmt > 0 ? (actualAmt / targetAmt).clamp(0.0, 1.0) : 0.0;
+            final targetColor = isIncome ? const Color(0xFF00A887) : const Color(0xFFEF4444);
+            final isOnTrack = isIncome
+                ? actualAmt >= targetAmt * 0.8
+                : actualAmt <= targetAmt;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: targetColor.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            isIncome ? Icons.trending_up_rounded : Icons.account_balance_wallet_outlined,
+                            color: targetColor,
+                            size: 14,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            t.title,
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: (isOnTrack ? const Color(0xFF00A887) : cs.error).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            isOnTrack ? 'On Track' : 'Under Target',
+                            style: TextStyle(
+                              color: isOnTrack ? const Color(0xFF00A887) : cs.error,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Actual: ₹${_compactK(actualAmt)}',
+                            style: TextStyle(color: targetColor, fontWeight: FontWeight.w700, fontSize: 12)),
+                        Text('Target: ₹${_compactK(targetAmt)}',
+                            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11)),
+                        Text('${(pct * 100).toStringAsFixed(0)}%',
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: pct,
+                        minHeight: 6,
+                        backgroundColor: cs.surfaceContainerHighest,
+                        valueColor: AlwaysStoppedAnimation<Color>(targetColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          })).toList(),
+          const Divider(height: 32),
+        ],
         // ── Summary Metric Grid ────────────────────────────────────────────
         Wrap(
           spacing: 8,

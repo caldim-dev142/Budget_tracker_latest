@@ -57,3 +57,15 @@ key.properties
 **/*.keystore
 *.jks
 **/*.jks
+
+# Executables & Binaries
+*.exe
+cloudflared.exe
+**/cloudflared.exe
+
+# Local Build outputs
+android/build/
+backend/build/
+.agents/
+Claude outputs/
+

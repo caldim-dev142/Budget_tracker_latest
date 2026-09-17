@@ -1,9 +1,12 @@
 const { Client } = require('pg');
 
 async function testConnection() {
-  // Using the exact IPv4 Pooler URL provided by the user
-  const connectionString = 'postgresql://postgres.ipfqnaqihgsqbbatayks:Vimalvimal@666@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres';
-  
+  // Credentials are read from the environment only — never commit a connection string.
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    console.error('DATABASE_URL environment variable is required.');
+    process.exit(1);
+  }
   const client = new Client({
     connectionString,
   });

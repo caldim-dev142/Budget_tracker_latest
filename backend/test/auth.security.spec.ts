@@ -194,9 +194,12 @@ describe('Firebase Authentication Security Verification', () => {
 
     await authService.googleSignIn('valid-firebase-id-token');
 
-    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
-      where: { email: 'test.user@example.com' },
-    });
+    // Lookup must use the verified token email (case-insensitive since DEF-AUTH-04), never a client-supplied value.
+    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { equals: 'test.user@example.com', mode: 'insensitive' } },
+      }),
+    );
   });
 
   it('8. Repeated login with the same Firebase account -> same application user, no duplicate user created', async () => {

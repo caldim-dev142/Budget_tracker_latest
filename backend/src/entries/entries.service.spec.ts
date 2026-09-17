@@ -18,6 +18,9 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
         update: jest.fn(),
         findMany: jest.fn(),
       },
+      monthSnapshot: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
     };
 
     service = new EntriesService(mockPrisma);
@@ -123,5 +126,58 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
     expect(result.failed).toBe(1);
     expect(mockPrisma.entry.update).not.toHaveBeenCalled();
     expect(mockPrisma.entry.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects creating or updating an entry in a closed month', async () => {
+    mockPrisma.monthSnapshot.findUnique.mockResolvedValue({
+      status: 'closed',
+    });
+
+    const result = await service.upsertBatch(
+      'household-A',
+      [
+        {
+          id: 'entry-closed',
+          categoryId: 'cat-1',
+          kind: 'spending',
+          entryDate: '2026-01-15T10:00:00.000Z',
+          amountPaise: 15000,
+        },
+      ],
+      'user-A',
+    );
+
+    expect(result.synced).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(mockPrisma.entry.create).not.toHaveBeenCalled();
+    expect(mockPrisma.entry.update).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite newer server entry if incoming version is stale', async () => {
+    mockPrisma.monthSnapshot.findUnique.mockResolvedValue(null);
+    mockPrisma.entry.findUnique.mockResolvedValue({
+      id: 'entry-v2',
+      householdId: 'household-A',
+      amountPaise: 50000,
+      version: 5, // Server has version 5
+    });
+
+    const result = await service.upsertBatch(
+      'household-A',
+      [
+        {
+          id: 'entry-v2',
+          categoryId: 'cat-1',
+          kind: 'spending',
+          entryDate: new Date().toISOString(),
+          amountPaise: 20000,
+          version: 3, // Client has stale version 3
+        },
+      ],
+      'user-A',
+    );
+
+    expect(result.synced).toBe(1); // Considered handled/synced without error
+    expect(mockPrisma.entry.update).not.toHaveBeenCalled(); // But DB was NOT overwritten with stale data
   });
 });

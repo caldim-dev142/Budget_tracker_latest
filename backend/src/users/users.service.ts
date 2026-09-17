@@ -69,16 +69,18 @@ export class UsersService {
       } else {
         // Sole member: cleanly delete the household and its associated scoped data
         await this.prisma.$transaction(async (tx) => {
+          await tx.monthSnapshot.deleteMany({ where: { householdId } });
+          await tx.syncTombstone.deleteMany({ where: { householdId } });
           await tx.entry.deleteMany({ where: { householdId } });
           await tx.budget.deleteMany({ where: { householdId } });
           await tx.category.deleteMany({ where: { householdId } });
           await tx.account.deleteMany({ where: { householdId } });
+          await tx.cardTransaction.deleteMany({ where: { card: { householdId } } });
           await tx.creditCard.deleteMany({ where: { householdId } });
-          await tx.cardTransaction.deleteMany({ where: { householdId } });
+          await tx.goalContribution.deleteMany({ where: { goal: { householdId } } });
           await tx.savingGoal.deleteMany({ where: { householdId } });
-          await tx.goalContribution.deleteMany({ where: { householdId } });
+          await tx.fundMovement.deleteMany({ where: { fund: { householdId } } });
           await tx.sinkingFund.deleteMany({ where: { householdId } });
-          await tx.fundMovement.deleteMany({ where: { householdId } });
           await tx.receivable.deleteMany({ where: { householdId } });
           await tx.plannedBill.deleteMany({ where: { householdId } });
           await tx.reserveLine.deleteMany({ where: { householdId } });

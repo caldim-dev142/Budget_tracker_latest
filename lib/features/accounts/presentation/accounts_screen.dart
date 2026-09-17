@@ -5,6 +5,8 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/money.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
@@ -54,7 +56,7 @@ class AccountsScreen extends ConsumerWidget {
             children: [
               Icon(Icons.error_outline_rounded, size: 48, color: cs.error),
               const SizedBox(height: 12),
-              Text('Error loading accounts: $e', style: TextStyle(color: cs.error)),
+              Text(AppFeedback.formatError(e), style: TextStyle(color: cs.error), textAlign: TextAlign.center),
             ],
           ),
         ),
@@ -393,6 +395,7 @@ class AccountsScreen extends ConsumerWidget {
               TextField(
                 controller: balanceCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
                 onTap: () {
                   // Select all so user can immediately type new value
                   balanceCtrl.selection = TextSelection(
@@ -402,7 +405,7 @@ class AccountsScreen extends ConsumerWidget {
                 },
                 decoration: const InputDecoration(
                   labelText: 'Opening Balance (₹)',
-                  hintText: '0',
+                  hintText: '0.00',
                   prefixText: '₹ ',
                 ),
               ),
@@ -417,64 +420,67 @@ class AccountsScreen extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
-
-                final balanceRupees = double.tryParse(balanceCtrl.text) ?? 0;
-                final balancePaise = (balanceRupees * 100).round();
-                final db = ref.read(appDatabaseProvider);
-                final auth = ref.read(authStateProvider).valueOrNull;
-                final householdId = auth?.householdId ?? 'local';
-                final accountId = _uuid.v4();
-
-                await db.accountDao.upsertAccount(
-                  AccountsTableCompanion.insert(
-                    id: accountId,
-                    householdId: householdId,
-                    name: name,
-                    type: type,
-                    currentBalancePaise: Value(balancePaise),
-                    isActive: const Value(true),
-                    sortOrder: const Value(0),
-                  ),
-                );
-
-                // If opening balance > 0, create an opening balance entry so it is never lost
-                if (balancePaise > 0) {
-                  final incomeCats = await (db.select(db.categoriesTable)
-                        ..where((c) => c.householdId.equals(householdId) & c.kind.equals('income'))
-                        ..limit(1))
-                      .get();
-                  final catId = incomeCats.isNotEmpty ? incomeCats.first.id : 'inc-05-$householdId';
-
-                  await db.entryDao.insertEntry(
-                    EntriesTableCompanion.insert(
-                      id: 'ob-$accountId',
-                      householdId: householdId,
-                      categoryId: catId,
-                      kind: 'income',
-                      accountId: Value(accountId),
-                      entryDate: DateTime.now(),
-                      amountPaise: balancePaise,
-                      note: Value('Opening Balance - $name'),
-                      createdBy: auth?.userId ?? 'user',
-                      createdAt: DateTime.now(),
-                      updatedAt: DateTime.now(),
-                    ),
-                  );
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter an account name.');
+                  return;
                 }
 
-                // Immediately trigger background sync so the account appears in PostgreSQL
-                ref.read(syncServiceProvider).triggerSync();
+                try {
+                  final balanceRupees = double.tryParse(balanceCtrl.text) ?? 0;
+                  final balancePaise = (balanceRupees * 100).round();
+                  final db = ref.read(appDatabaseProvider);
+                  final auth = ref.read(authStateProvider).valueOrNull;
+                  final householdId = auth?.householdId ?? 'local';
+                  final accountId = _uuid.v4();
 
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Account "$name" added successfully!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  await db.accountDao.upsertAccount(
+                    AccountsTableCompanion.insert(
+                      id: accountId,
+                      householdId: householdId,
+                      name: name,
+                      type: type,
+                      currentBalancePaise: Value(balancePaise),
+                      isActive: const Value(true),
+                      sortOrder: const Value(0),
                     ),
                   );
+
+                  // If opening balance > 0, create an opening balance entry so it is never lost
+                  if (balancePaise > 0) {
+                    final incomeCats = await (db.select(db.categoriesTable)
+                          ..where((c) => c.householdId.equals(householdId) & c.kind.equals('income'))
+                          ..limit(1))
+                        .get();
+                    final catId = incomeCats.isNotEmpty ? incomeCats.first.id : 'inc-05-$householdId';
+
+                    await db.entryDao.insertEntry(
+                      EntriesTableCompanion.insert(
+                        id: 'ob-$accountId',
+                        householdId: householdId,
+                        categoryId: catId,
+                        kind: 'income',
+                        accountId: Value(accountId),
+                        entryDate: DateTime.now(),
+                        amountPaise: balancePaise,
+                        note: Value('Opening Balance - $name'),
+                        createdBy: auth?.userId ?? 'user',
+                        createdAt: DateTime.now(),
+                        updatedAt: DateTime.now(),
+                      ),
+                    );
+                  }
+
+                  // Immediately trigger background sync so the account appears in PostgreSQL
+                  ref.read(syncServiceProvider).triggerSync();
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Account "$name" created!');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to create account', error: e);
+                  }
                 }
               },
               child: const Text('Save'),
@@ -507,6 +513,7 @@ class AccountsScreen extends ConsumerWidget {
                 controller: nameCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Account Name *',
+                  hintText: 'e.g. HDFC Savings',
                 ),
               ),
               const SizedBox(height: 12),
@@ -524,8 +531,10 @@ class AccountsScreen extends ConsumerWidget {
               TextField(
                 controller: balanceCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
                 decoration: const InputDecoration(
                   labelText: 'Current Balance (₹)',
+                  hintText: '0.00',
                   prefixText: '₹ ',
                 ),
               ),
@@ -540,29 +549,32 @@ class AccountsScreen extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter an account name.');
+                  return;
+                }
 
-                final balancePaise =
-                    ((double.tryParse(balanceCtrl.text) ?? 0) * 100).round();
-                final db = ref.read(appDatabaseProvider);
-                await (db.update(db.accountsTable)..where((a) => a.id.equals(account.id)))
-                    .write(AccountsTableCompanion(
-                      name: Value(name),
-                      type: Value(type),
-                      currentBalancePaise: Value(balancePaise),
-                    ));
+                try {
+                  final balancePaise =
+                      ((double.tryParse(balanceCtrl.text) ?? 0) * 100).round();
+                  final db = ref.read(appDatabaseProvider);
+                  await (db.update(db.accountsTable)..where((a) => a.id.equals(account.id)))
+                      .write(AccountsTableCompanion(
+                        name: Value(name),
+                        type: Value(type),
+                        currentBalancePaise: Value(balancePaise),
+                      ));
 
-                ref.read(syncServiceProvider).triggerSync();
+                  ref.read(syncServiceProvider).triggerSync();
 
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Account "$name" updated!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Account "$name" updated!');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to update account', error: e);
+                  }
                 }
               },
               child: const Text('Save'),
@@ -575,24 +587,12 @@ class AccountsScreen extends ConsumerWidget {
 
   Future<void> _deactivateAccount(
       BuildContext context, WidgetRef ref, AccountsTableData account) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Remove Account'),
-        content: Text('Are you sure you want to remove "${account.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Remove Account',
+      message: 'Are you sure you want to remove "${account.name}"?',
+      confirmLabel: 'Remove',
+      isDestructive: true,
     );
     if (confirmed == true) {
       final db = ref.read(appDatabaseProvider);
@@ -600,6 +600,9 @@ class AccountsScreen extends ConsumerWidget {
             ..where((a) => a.id.equals(account.id)))
           .write(const AccountsTableCompanion(isActive: Value(false)));
       ref.read(syncServiceProvider).triggerSync();
+      if (context.mounted) {
+        AppFeedback.showSuccess(context, 'Account "${account.name}" removed.');
+      }
     }
   }
 
@@ -705,9 +708,22 @@ class AccountsScreen extends ConsumerWidget {
                                     IconButton(
                                       icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
                                       onPressed: () async {
-                                        final db = ref.read(appDatabaseProvider);
-                                        await (db.delete(db.entriesTable)..where((e) => e.id.equals(t.id))).go();
-                                        if (ctx.mounted) Navigator.pop(ctx);
+                                        final confirmed = await AppFeedback.showConfirmDialog(
+                                          ctx,
+                                          title: 'Delete Transaction',
+                                          message: 'Are you sure you want to delete this transaction?',
+                                          confirmLabel: 'Delete',
+                                          isDestructive: true,
+                                        );
+                                        if (confirmed == true) {
+                                          final db = ref.read(appDatabaseProvider);
+                                          await db.entryDao.softDelete(t.id);
+                                          ref.read(syncServiceProvider).triggerSync();
+                                          if (ctx.mounted) Navigator.pop(ctx);
+                                          if (context.mounted) {
+                                            AppFeedback.showSuccess(context, 'Transaction deleted.');
+                                          }
+                                        }
                                       },
                                     ),
                                   ],
@@ -804,7 +820,7 @@ extension on AccountsScreen {
         const SizedBox(height: 6),
         receivablesAsync.when(
           loading: () => const LinearProgressIndicator(),
-          error: (e, _) => Text('Error loading receivables: $e'),
+          error: (e, _) => Text(AppFeedback.formatError(e)),
           data: (items) {
             if (items.isEmpty) {
               return Card(
@@ -857,6 +873,9 @@ extension on AccountsScreen {
                                 final db = ref.read(appDatabaseProvider);
                                 await db.borrowLendDao.settleReceivable(item.id);
                                 ref.read(syncServiceProvider).triggerSync();
+                                if (context.mounted) {
+                                  AppFeedback.showSuccess(context, 'Marked "${item.personName}" as returned.');
+                                }
                               },
                             ),
                           ],
@@ -904,7 +923,7 @@ extension on AccountsScreen {
         const SizedBox(height: 6),
         billsAsync.when(
           loading: () => const LinearProgressIndicator(),
-          error: (e, _) => Text('Error loading planned bills: $e'),
+          error: (e, _) => Text(AppFeedback.formatError(e)),
           data: (items) {
             if (items.isEmpty) {
               return Card(
@@ -957,6 +976,9 @@ extension on AccountsScreen {
                                 final db = ref.read(appDatabaseProvider);
                                 await db.borrowLendDao.settlePlannedBill(item.id);
                                 ref.read(syncServiceProvider).triggerSync();
+                                if (context.mounted) {
+                                  AppFeedback.showSuccess(context, 'Marked "${item.name}" as paid.');
+                                }
                               },
                             ),
                           ],
@@ -995,8 +1017,10 @@ extension on AccountsScreen {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -1011,10 +1035,16 @@ extension on AccountsScreen {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a person or beneficiary name.');
+                return;
+              }
 
               final amountPaise = ((double.tryParse(amountCtrl.text) ?? 0) * 100).round();
-              if (amountPaise <= 0) return;
+              if (amountPaise <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
 
               final db = ref.read(appDatabaseProvider);
               final auth = ref.read(authStateProvider).valueOrNull;
@@ -1029,13 +1059,7 @@ extension on AccountsScreen {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Receivable "$name" added!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, 'Receivable "$name" added!');
               }
             },
             child: const Text('Save'),
@@ -1069,8 +1093,10 @@ extension on AccountsScreen {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -1085,10 +1111,16 @@ extension on AccountsScreen {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a bill name.');
+                return;
+              }
 
               final amountPaise = ((double.tryParse(amountCtrl.text) ?? 0) * 100).round();
-              if (amountPaise <= 0) return;
+              if (amountPaise <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
 
               final db = ref.read(appDatabaseProvider);
               final auth = ref.read(authStateProvider).valueOrNull;
@@ -1103,13 +1135,7 @@ extension on AccountsScreen {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Planned Bill "$name" added!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, 'Planned Bill "$name" added!');
               }
             },
             child: const Text('Save'),

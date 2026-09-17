@@ -1,12 +1,15 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../../data/local/database.dart';
+import '../../../core/security/secure_store.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
 import '../../auth/providers/auth_providers.dart';
+import '../../../core/utils/app_feedback.dart';
 
 class NotificationAlert {
   final String id;
@@ -28,7 +31,45 @@ class NotificationAlert {
   });
 }
 
-final dismissedNotificationsProvider = StateProvider<Set<String>>((ref) => {});
+const _kDismissedKey = 'dismissed_notifications_v1';
+
+// Persisted dismissed notification IDs using SecureStore.
+class _DismissedNotificationsNotifier extends StateNotifier<Set<String>> {
+  _DismissedNotificationsNotifier() : super({}) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final raw = await SecureStore.read(_kDismissedKey);
+      if (raw != null && raw.isNotEmpty) {
+        final list = (jsonDecode(raw) as List).cast<String>();
+        state = list.toSet();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> dismiss(String id) async {
+    state = {...state, id};
+    await _persist();
+  }
+
+  Future<void> dismissAll(Set<String> ids) async {
+    state = {...state, ...ids};
+    await _persist();
+  }
+
+  Future<void> _persist() async {
+    try {
+      await SecureStore.write(_kDismissedKey, jsonEncode(state.toList()));
+    } catch (_) {}
+  }
+}
+
+final dismissedNotificationsProvider =
+    StateNotifierProvider<_DismissedNotificationsNotifier, Set<String>>(
+  (_) => _DismissedNotificationsNotifier(),
+);
 
 final dynamicNotificationsProvider = StreamProvider<List<NotificationAlert>>((ref) async* {
   final db = ref.watch(appDatabaseProvider);
@@ -114,7 +155,7 @@ final dynamicNotificationsProvider = StreamProvider<List<NotificationAlert>>((re
           icon: Icons.account_balance_wallet_outlined,
           color: Colors.teal,
           time: 'Pending',
-          path: '/more/receivables',
+          path: '/more/planning',  // Receivables tab is inside Planning Annexure
         ));
       }
     }
@@ -130,34 +171,46 @@ final dynamicNotificationsProvider = StreamProvider<List<NotificationAlert>>((re
           icon: Icons.receipt_long_rounded,
           color: Colors.indigo,
           time: 'Pending',
-          path: '/more',
+          path: '/more/planning',  // Planned Bills tab is inside Planning Annexure
         ));
       }
     }
 
-    // 5. Month Rollover Status Alert
-    final snap = await db.snapshotDao.getForMonth(ymStr, householdId: householdId);
-    final isClosed = snap?.status == 'closed';
-    if (!isClosed) {
-      alerts.add(NotificationAlert(
-        id: 'rollover_$ymStr',
-        title: 'Month Rollover Pending',
-        message: 'Active period $ymStr is currently open. Ensure all cash spending is tallied before closing.',
-        icon: Icons.lock_clock_rounded,
-        color: Colors.amber,
-        time: 'Current Period',
-        path: '/more',
-      ));
+    // 5. Month Rollover Status Alert — only alert when the PRIOR month is still unclosed.
+    //    The current active month being open is always normal and not actionable.
+    final now = DateTime.now();
+    final prevYm = ym.addMonths(-1);
+    final prevYmStr = prevYm.toString();
+    final isCurrentMonth = ym.year == now.year && ym.month == now.month;
+
+    if (isCurrentMonth) {
+      // Only warn about the previous month if it was never closed.
+      final prevSnap = await db.snapshotDao.getForMonth(prevYmStr, householdId: householdId);
+      if (prevSnap != null && prevSnap.status != 'closed') {
+        alerts.add(NotificationAlert(
+          id: 'rollover_pending_$prevYmStr',
+          title: 'Prior Month Not Closed',
+          message: 'Period $prevYmStr is still open. Please close it before the month ends to carry the balance forward.',
+          icon: Icons.lock_clock_rounded,
+          color: Colors.amber,
+          time: 'Action Needed',
+          path: '/more',
+        ));
+      }
     } else {
-      alerts.add(NotificationAlert(
-        id: 'rollover_closed_$ymStr',
-        title: 'Month Period Closed',
-        message: 'Period $ymStr is closed and remaining balance of ₹${((snap?.closingBalancePaise ?? 0) / 100).toStringAsFixed(0)} was carried forward.',
-        icon: Icons.check_circle_outline_rounded,
-        color: Colors.green,
-        time: 'Closed Period',
-        path: '/more',
-      ));
+      // For historical months, show status only if closed.
+      final snap = await db.snapshotDao.getForMonth(ymStr, householdId: householdId);
+      if (snap != null && snap.status == 'closed') {
+        alerts.add(NotificationAlert(
+          id: 'rollover_closed_$ymStr',
+          title: 'Month Period Closed',
+          message: 'Period $ymStr is closed — balance of ₹${((snap.closingBalancePaise) / 100).toStringAsFixed(0)} was carried forward.',
+          icon: Icons.check_circle_outline_rounded,
+          color: Colors.green,
+          time: 'Closed',
+          path: '/more',
+        ));
+      }
     }
 
     // Filter out dismissed alerts
@@ -181,37 +234,19 @@ class NotificationsScreen extends ConsumerWidget {
           alertsAsync.maybeWhen(
             data: (alerts) => alerts.isNotEmpty
                 ? TextButton.icon(
-                    onPressed: () {
-                      showDialog(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          title: const Text('Clear All Notifications?'),
-                          content: const Text('Are you sure you want to clear all notification alerts?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx),
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                              onPressed: () {
-                                Navigator.pop(ctx);
-                                final ids = alerts.map((a) => a.id).toSet();
-                                ref.read(dismissedNotificationsProvider.notifier).update((s) => {...s, ...ids});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text('All notifications cleared!'),
-                                    behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                );
-                              },
-                              child: const Text('Clear All'),
-                            ),
-                          ],
-                        ),
+                    onPressed: () async {
+                      final confirm = await AppFeedback.showConfirmDialog(
+                        context,
+                        title: 'Clear All Notifications?',
+                        message: 'Are you sure you want to clear all notification alerts?',
+                        confirmLabel: 'Clear All',
+                        isDestructive: true,
                       );
+                      if (confirm == true && context.mounted) {
+                        final ids = alerts.map((a) => a.id).toSet();
+                        ref.read(dismissedNotificationsProvider.notifier).dismissAll(ids);
+                        AppFeedback.showSuccess(context, 'All notifications cleared!');
+                      }
                     },
                     icon: const Icon(Icons.clear_all_rounded, size: 18),
                     label: const Text('Clear All'),
@@ -273,15 +308,8 @@ class NotificationsScreen extends ConsumerWidget {
                 key: Key(alert.id),
                 direction: DismissDirection.endToStart,
                 onDismissed: (_) {
-                  ref.read(dismissedNotificationsProvider.notifier).update((s) => {...s, alert.id});
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Notification dismissed.'),
-                      behavior: SnackBarBehavior.floating,
-                      duration: const Duration(seconds: 2),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  ref.read(dismissedNotificationsProvider.notifier).dismiss(alert.id);
+                  AppFeedback.showInfo(context, 'Notification dismissed.');
                 },
                 background: Container(
                   alignment: Alignment.centerRight,
@@ -360,15 +388,8 @@ class NotificationsScreen extends ConsumerWidget {
                           IconButton(
                             icon: Icon(Icons.close_rounded, size: 18, color: cs.onSurfaceVariant),
                             onPressed: () {
-                              ref.read(dismissedNotificationsProvider.notifier).update((s) => {...s, alert.id});
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text('Notification dismissed.'),
-                                  behavior: SnackBarBehavior.floating,
-                                  duration: const Duration(seconds: 2),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                              );
+                              ref.read(dismissedNotificationsProvider.notifier).dismiss(alert.id);
+                              AppFeedback.showInfo(context, 'Notification dismissed.');
                             },
                             tooltip: 'Dismiss',
                           ),

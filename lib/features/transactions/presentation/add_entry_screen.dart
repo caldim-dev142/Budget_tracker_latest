@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/utils/category_icons.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/utils/month.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../data/local/database.dart';
 import '../../../domain/entities/entry.dart';
 import '../../../domain/usecases/add_entry.dart';
@@ -122,24 +124,12 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
 
   Future<void> _save() async {
     if (_parsedAmount == null || _parsedAmount!.isZero) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please enter an amount greater than zero.'),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
+      AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
       return;
     }
 
     if (_selectedCategoryId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please select a category.'),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
+      AppFeedback.showWarning(context, 'Please select a category.');
       return;
     }
 
@@ -168,25 +158,11 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
       setState(() => _saving = false);
       if (success) {
         ref.read(selectedMonthProvider.notifier).select(YearMonth.fromDate(_entryDate));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$_kindLabel saved!'),
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, '$_kindLabel saved successfully!');
         context.pop();
       } else {
         final err = ref.read(addEntryControllerProvider).error;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(err?.toString() ?? 'Failed to save entry'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showError(context, 'Failed to save entry', error: err);
       }
     }
   }
@@ -319,6 +295,7 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
                       controller: _amountCtrl,
                       focusNode: _amountFocusNode,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [AppInputFormatters.positiveDecimal()],
                       textAlign: TextAlign.right,
                       style: Theme.of(context).textTheme.displayLarge?.copyWith(
                         color: _amountStr.isEmpty
@@ -328,7 +305,7 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
                         fontSize: 38,
                       ),
                       decoration: InputDecoration(
-                        hintText: '0',
+                        hintText: '0.00',
                         hintStyle: Theme.of(context).textTheme.displayLarge?.copyWith(
                           color: cs.onSurfaceVariant.withValues(alpha: 0.4),
                           fontWeight: FontWeight.w800,

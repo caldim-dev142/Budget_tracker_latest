@@ -6,15 +6,24 @@ import 'package:uuid/uuid.dart';
 
 import '../../../data/local/database.dart';
 import '../../../core/utils/money.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../domain/engine/waterfall.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/month_switcher.dart';
-import '../../../shared/widgets/budget_bar.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../providers/dashboard_providers.dart';
+
+/// Annual Targets overview — displayed on dashboard as a quick summary.
+final _dashAnnualTargetsProvider = StreamProvider.autoDispose
+    .family<List<AnnualTargetsTableData>, String>((ref, householdId) {
+  final db = ref.watch(appDatabaseProvider);
+  return (db.select(db.annualTargetsTable)
+        ..where((t) => t.householdId.equals(householdId)))
+      .watch();
+});
 
 /// S3 — Dashboard (doc 09 S3).
 /// The money's monthly journey at a glance:
@@ -100,6 +109,8 @@ class DashboardScreen extends ConsumerWidget {
                     returnAwaited: vm.returnAwaited,
                     toBePaid: vm.toBePaid,
                   ),
+                  const SizedBox(height: 16),
+                  _AnnualTargetsCard(householdId: householdId),
                   const SizedBox(height: 16),
                   if (vm.layerBudgets.isNotEmpty)
                     _LayerBudgetsSection(budgets: vm.layerBudgets),
@@ -963,7 +974,9 @@ class _DashboardSkeleton extends StatelessWidget {
 
 Future<void> _showEditOpeningBalance(BuildContext context, WidgetRef ref, Money currentBalance) async {
   final ym = ref.read(selectedMonthProvider);
-  final ctrl = TextEditingController(text: (currentBalance.paise / 100).toStringAsFixed(2));
+  final ctrl = TextEditingController(
+    text: currentBalance.paise != 0 ? (currentBalance.paise / 100).toStringAsFixed(2) : '',
+  );
 
   await showDialog(
     context: context,
@@ -972,13 +985,23 @@ Future<void> _showEditOpeningBalance(BuildContext context, WidgetRef ref, Money 
       content: TextField(
         controller: ctrl,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: const InputDecoration(labelText: 'Amount (₹)', prefixText: '₹ '),
+        inputFormatters: [AppInputFormatters.positiveDecimal()],
+        decoration: const InputDecoration(
+          labelText: 'Amount (₹)',
+          hintText: '0.00',
+          prefixText: '₹ ',
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         FilledButton(
           onPressed: () async {
-            final val = double.tryParse(ctrl.text) ?? 0;
+            final text = ctrl.text.trim();
+            final val = double.tryParse(text) ?? 0;
+            if (text.isNotEmpty && val < 0) {
+              AppFeedback.showWarning(ctx, 'Please enter a valid amount.');
+              return;
+            }
             final paise = (val * 100).round();
             
             final db = ref.read(appDatabaseProvider);
@@ -1028,6 +1051,9 @@ Future<void> _showEditOpeningBalance(BuildContext context, WidgetRef ref, Money 
             }
             
             if (ctx.mounted) Navigator.pop(ctx);
+            if (context.mounted) {
+              AppFeedback.showSuccess(context, 'Opening balance updated.');
+            }
           },
           child: const Text('Save'),
         ),
@@ -1076,6 +1102,180 @@ class _ReconciliationInsightBanner extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Annual Targets Dashboard Card ───────────────────────────────────────────
+
+class _AnnualTargetsCard extends ConsumerWidget {
+  final String householdId;
+  const _AnnualTargetsCard({required this.householdId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final targetsAsync = ref.watch(_dashAnnualTargetsProvider(householdId));
+    final cs = Theme.of(context).colorScheme;
+
+    return targetsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (targets) {
+        if (targets.isEmpty) return const SizedBox.shrink();
+
+        final incomeTargets = targets.where((t) => t.type == 'income').toList();
+        final expenseTargets = targets.where((t) => t.type == 'expense').toList();
+        final totalIncomePaise = incomeTargets.fold<int>(0, (s, t) => s + t.targetPaise);
+        final totalExpensePaise = expenseTargets.fold<int>(0, (s, t) => s + t.targetPaise);
+        final netSavingsPaise = totalIncomePaise - totalExpensePaise;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: PressableScale(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => context.push('/more/planning'),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.flag_rounded, color: Color(0xFF8B5CF6), size: 16),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'ANNUAL TARGETS',
+                              style: TextStyle(
+                                color: cs.onSurfaceVariant,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                            Text(
+                              '${targets.length} target${targets.length == 1 ? '' : 's'} set',
+                              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right_rounded, size: 20),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _AnnualTargetStat(
+                        label: 'Income Target',
+                        amount: Money(totalIncomePaise),
+                        color: const Color(0xFF00A887),
+                      ),
+                      const SizedBox(width: 8),
+                      _AnnualTargetStat(
+                        label: 'Expense Budget',
+                        amount: Money(totalExpensePaise),
+                        color: cs.error,
+                      ),
+                      const SizedBox(width: 8),
+                      _AnnualTargetStat(
+                        label: 'Net Savings',
+                        amount: Money(netSavingsPaise),
+                        color: netSavingsPaise >= 0 ? const Color(0xFF8B5CF6) : cs.error,
+                      ),
+                    ],
+                  ),
+                  if (targets.length <= 4) ...[ 
+                    const SizedBox(height: 12),
+                    ...targets.map((t) {
+                      final isIncome = t.type == 'income';
+                      final targetColor = isIncome ? const Color(0xFF00A887) : const Color(0xFFEF4444);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                t.title,
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            MoneyText(
+                              Money(t.targetPaise),
+                              style: TextStyle(
+                                color: targetColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AnnualTargetStat extends StatelessWidget {
+  final String label;
+  final Money amount;
+  final Color color;
+
+  const _AnnualTargetStat({
+    required this.label,
+    required this.amount,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 2),
+            MoneyText(
+              amount,
+              style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 12),
             ),
           ],
         ),

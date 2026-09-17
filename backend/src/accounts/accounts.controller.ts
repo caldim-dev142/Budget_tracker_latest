@@ -2,10 +2,12 @@ import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from '@nest
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AccountsService } from './accounts.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { HouseholdGuard } from '../auth/guards/household.guard';
+import { CreateAccountDto, UpdateAccountBalanceDto } from './dto/account.dto';
 
 @ApiTags('accounts')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @Controller('accounts')
 export class AccountsController {
   constructor(private readonly accountsService: AccountsService) {}
@@ -18,13 +20,8 @@ export class AccountsController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new account' })
-  createAccount(
-    @Req() req: any,
-    @Body('name') name: string,
-    @Body('type') type: 'bank' | 'cash',
-    @Body('balancePaise') balancePaise: number,
-  ) {
-    return this.accountsService.createAccount(req.user.householdId, name, type, balancePaise);
+  createAccount(@Req() req: any, @Body() body: CreateAccountDto) {
+    return this.accountsService.createAccount(req.user.householdId, body.name, body.type as 'bank' | 'cash', body.balancePaise);
   }
 
   @Patch(':id/balance')
@@ -32,8 +29,8 @@ export class AccountsController {
   updateBalance(
     @Req() req: any,
     @Param('id') id: string,
-    @Body('balancePaise') balancePaise: number,
+    @Body() body: UpdateAccountBalanceDto,
   ) {
-    return this.accountsService.updateBalance(req.user.householdId, id, balancePaise);
+    return this.accountsService.updateBalance(req.user.householdId, id, body.balancePaise);
   }
 }

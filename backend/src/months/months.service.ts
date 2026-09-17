@@ -1,6 +1,21 @@
-import { Injectable, Inject, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { EngineService } from '../engine/engine.service';
+import { monthRange } from '../common/month-range';
+
+const SNAPSHOT_PAISE_FIELDS = [
+  'openingBalancePaise', 'lastMonthReservesPaise', 'incomePaise', 'adjustmentsPaise', 'spendingPaise',
+  'protectionPaise', 'savingPaise', 'reservesPaise', 'closingBalancePaise', 'remainingPaise',
+] as const;
+
+/** Month snapshot with paise columns serialised as JSON numbers. */
+export function toSnapshotResponse<T extends Record<string, any>>(snap: T): T {
+  const out: Record<string, any> = { ...snap };
+  for (const f of SNAPSHOT_PAISE_FIELDS) {
+    if (out[f] !== undefined && out[f] !== null) out[f] = Number(out[f]);
+  }
+  return out as T;
+}
 
 @Injectable()
 export class MonthsService {
@@ -11,47 +26,24 @@ export class MonthsService {
 
   async getSnapshot(householdId: string, yearMonth: string) {
     const snap = await this.prisma.monthSnapshot.findUnique({
-      where: {
-        householdId_yearMonth: {
-          householdId,
-          yearMonth,
-        },
-      },
+      where: { householdId_yearMonth: { householdId, yearMonth } },
     });
-
     if (!snap) return null;
-
-    return {
-      ...snap,
-      openingBalancePaise: Number(snap.openingBalancePaise),
-      lastMonthReservesPaise: Number(snap.lastMonthReservesPaise),
-      incomePaise: Number(snap.incomePaise),
-      adjustmentsPaise: Number(snap.adjustmentsPaise),
-      spendingPaise: Number(snap.spendingPaise),
-      protectionPaise: Number(snap.protectionPaise),
-      savingPaise: Number(snap.savingPaise),
-      reservesPaise: Number(snap.reservesPaise),
-      closingBalancePaise: Number(snap.closingBalancePaise),
-      remainingPaise: Number(snap.remainingPaise),
-    };
+    return toSnapshotResponse(snap);
   }
 
   async isMonthOpen(householdId: string, yearMonth: string): Promise<boolean> {
     const snap = await this.prisma.monthSnapshot.findUnique({
-      where: {
-        householdId_yearMonth: {
-          householdId,
-          yearMonth,
-        },
-      },
+      where: { householdId_yearMonth: { householdId, yearMonth } },
     });
-    if (!snap) return true; // Open if no snapshot exists yet
+    if (!snap) return true;
     return snap.status === 'open';
   }
 
   /**
-   * Close a month: freeze actuals, compute closing balance, and initialize next month's opening.
-   * Idempotent (doc 06 ยง4).
+   * Close a month: freeze actuals derived from real DB entries, compute closing balance,
+   * and initialize next month opening. Idempotent (doc 06 ง4).
+   * Fix: update branch now freezes ALL actuals (previously only set status + closedAt).
    */
   async closeMonth(
     householdId: string,
@@ -70,20 +62,13 @@ export class MonthsService {
   ) {
     const existing = await this.getSnapshot(householdId, yearMonth);
     if (existing && existing.status === 'closed') {
-      return existing; // Already closed (idempotent no-op)
+      return existing;
     }
 
-    const [year, month] = yearMonth.split('-').map(Number);
-    const from = new Date(year, month - 1, 1);
-    const to = new Date(year, month, 0, 23, 59, 59);
+    const { from, to } = monthRange(yearMonth);
 
-    // 1. Fetch entries for the month
     const entries = await this.prisma.entry.findMany({
-      where: {
-        householdId,
-        entryDate: { gte: from, lte: to },
-        deletedAt: null,
-      },
+      where: { householdId, entryDate: { gte: from, lt: to }, deletedAt: null },
     });
 
     let income = 0;
@@ -93,145 +78,124 @@ export class MonthsService {
     let protection = 0;
     let saving = 0;
 
+    const categoryRows = await this.prisma.category.findMany({
+      where: { householdId },
+      select: { id: true, isDeduction: true },
+    });
+    const deductionSet = new Set(categoryRows.filter((c) => c.isDeduction).map((c) => c.id));
+
     for (const e of entries) {
-      const amt = e.amountPaise;
+      const amt = Number(e.amountPaise);
       switch (e.kind) {
-        case 'income':
-          income += amt;
-          break;
-        case 'incomeDeduction':
-          incomeDeduction += amt;
-          break;
-        case 'adjustment':
-          adjustments += amt;
-          break;
-        case 'spending':
-          spending += amt;
-          break;
-        case 'protection':
-          protection += amt;
-          break;
-        case 'saving':
-          saving += amt;
-          break;
+        case 'income':          income += amt; break;
+        case 'incomeDeduction': incomeDeduction += amt; break;
+        case 'adjustment':      adjustments += deductionSet.has(e.categoryId) ? -amt : amt; break;
+        case 'spending':        spending += amt; break;
+        case 'protection':      protection += amt; break;
+        case 'saving':          saving += amt; break;
       }
     }
-
     const netIncome = income - incomeDeduction;
 
-    // 2. Fetch prior snapshot to compute opening and lastMonthReserves
     const priorYm = this.getPriorYearMonth(yearMonth);
     const priorSnap = await this.prisma.monthSnapshot.findUnique({
       where: { householdId_yearMonth: { householdId, yearMonth: priorYm } },
     });
-
     const activeSnap = await this.prisma.monthSnapshot.findUnique({
       where: { householdId_yearMonth: { householdId, yearMonth } },
     });
-
     const openingBalance = activeSnap
-      ? activeSnap.openingBalancePaise
-      : priorSnap
-      ? priorSnap.closingBalancePaise
-      : 0;
-
+      ? Number(activeSnap.openingBalancePaise)
+      : priorSnap ? Number(priorSnap.closingBalancePaise) : 0;
     const lastMonthReserves = activeSnap
-      ? activeSnap.lastMonthReservesPaise
-      : priorSnap
-      ? priorSnap.reservesPaise
-      : 0;
+      ? Number(activeSnap.lastMonthReservesPaise)
+      : priorSnap ? Number(priorSnap.reservesPaise) : 0;
 
-    // 3. Fetch sinking fund reserve total
     const funds = await this.prisma.sinkingFund.findMany({
       where: { householdId, archivedAt: null },
       include: { movements: true },
     });
-
     let totalReserves = 0;
     for (const f of funds) {
-      const fundOpening = f.openingReservePaise;
-      const contributions = f.movements
-        .filter((m) => m.type === 'contribution')
-        .reduce((sum, m) => sum + m.amountPaise, 0);
-      const withdrawals = f.movements
-        .filter((m) => m.type === 'withdrawal')
-        .reduce((sum, m) => sum + m.amountPaise, 0);
-      totalReserves += this.engine.closingReserve(fundOpening, contributions, withdrawals);
+      const contributions = f.movements.filter((m) => m.type === 'contribution').reduce((s, m) => s + Number(m.amountPaise), 0);
+      const withdrawals   = f.movements.filter((m) => m.type === 'withdrawal').reduce((s, m) => s + Number(m.amountPaise), 0);
+      totalReserves += this.engine.closingReserve(Number(f.openingReservePaise), contributions, withdrawals);
     }
 
-    // 4. Fetch bank/cash accounts total available balance
-    const accounts = await this.prisma.account.findMany({
-      where: { householdId, isActive: true },
-    });
-    const totalAvailable = accounts.reduce((sum, a) => sum + a.currentBalancePaise, 0);
+    const accounts = await this.prisma.account.findMany({ where: { householdId, isActive: true } });
+    const totalAvailableDb = accounts.reduce((s, a) => s + Number(a.currentBalancePaise), 0);
 
-    const closingBalance = this.engine.closingBalance(totalAvailable, totalReserves);
+    const closingBalance = this.engine.closingBalance(totalAvailableDb, totalReserves);
+    const remainingPaise = this.engine.computeWaterfall({
+      openingBalance,
+      lastMonthReserves,
+      income: netIncome,
+      adjustments,
+      spending,
+      protection,
+      saving,
+      reservesSetAside: totalReserves,
+    }).remaining;
+
+    const frozenData = {
+      openingBalancePaise:    openingBalance,
+      lastMonthReservesPaise: lastMonthReserves,
+      incomePaise:            netIncome,
+      adjustmentsPaise:       adjustments,
+      spendingPaise:          spending,
+      protectionPaise:        protection,
+      savingPaise:            saving,
+      reservesPaise:          totalReserves,
+      closingBalancePaise:    closingBalance,
+      remainingPaise,
+      status:                 'closed' as const,
+      closedAt:               new Date(),
+      statusChangedAt:        new Date(),
+    };
 
     const snapshot = await this.prisma.monthSnapshot.upsert({
-      where: {
-        householdId_yearMonth: {
-          householdId,
-          yearMonth,
-        },
-      },
-      create: {
-        householdId,
-        yearMonth,
-        openingBalancePaise: openingBalance,
-        lastMonthReservesPaise: lastMonthReserves,
-        incomePaise: netIncome,
-        adjustmentsPaise: adjustments,
-        spendingPaise: spending,
-        protectionPaise: protection,
-        savingPaise: saving,
-        reservesPaise: totalReserves,
-        closingBalancePaise: closingBalance,
-        remainingPaise: this.engine.computeWaterfall({
-          openingBalance,
-          lastMonthReserves,
-          income: netIncome,
-          adjustments,
-          spending,
-          protection,
-          saving,
-          reservesSetAside: totalReserves,
-        }).remaining,
-        status: 'closed',
-        closedAt: new Date(),
-      },
-      update: {
-        status: 'closed',
-        closedAt: new Date(),
-      },
+      where:  { householdId_yearMonth: { householdId, yearMonth } },
+      create: { householdId, yearMonth, ...frozenData },
+      update: frozenData,
     });
 
-    // Seed next month's opening snapshot structure (so next month can carry forward)
     const nextYm = this.getNextYearMonth(yearMonth);
-    await this.prisma.monthSnapshot.upsert({
-      where: {
-        householdId_yearMonth: {
-          householdId,
-          yearMonth: nextYm,
-        },
-      },
-      create: {
-        householdId,
-        yearMonth: nextYm,
-        openingBalancePaise: closingBalance,
-        lastMonthReservesPaise: totalReserves,
-        status: 'open',
-      },
-      update: {
-        openingBalancePaise: closingBalance,
-        lastMonthReservesPaise: totalReserves,
-      },
+    const nextSnap = await this.prisma.monthSnapshot.findUnique({
+      where: { householdId_yearMonth: { householdId, yearMonth: nextYm } },
+      select: { status: true },
     });
+    // Only a missing or open next month is (re)seeded. A closed month is frozen and must never be
+    // mutated by re-closing an earlier month; reopen it first if the rollover must be applied again.
+    if (!nextSnap || nextSnap.status !== 'closed') {
+      await this.prisma.monthSnapshot.upsert({
+        where:  { householdId_yearMonth: { householdId, yearMonth: nextYm } },
+        create: { householdId, yearMonth: nextYm, openingBalancePaise: closingBalance, lastMonthReservesPaise: totalReserves, status: 'open' },
+        update: { openingBalancePaise: closingBalance, lastMonthReservesPaise: totalReserves },
+      });
+    }
 
-    return {
-      ...snapshot,
-      openingBalancePaise: snapshot.openingBalancePaise,
-      closingBalancePaise: snapshot.closingBalancePaise,
-    };
+    return toSnapshotResponse(snapshot);
+  }
+
+  /**
+   * Reopen a closed month: sets status back to 'open', clears closedAt.
+   * Next month opening snapshot is NOT modified. Idempotent.
+   */
+  async reopenMonth(householdId: string, yearMonth: string) {
+    const existing = await this.prisma.monthSnapshot.findUnique({
+      where: { householdId_yearMonth: { householdId, yearMonth } },
+    });
+    if (!existing) {
+      throw new NotFoundException(`No snapshot found for ${yearMonth}`);
+    }
+    if (existing.status === 'open') {
+      return toSnapshotResponse(existing);
+    }
+    const reopened = await this.prisma.monthSnapshot.update({
+      where: { householdId_yearMonth: { householdId, yearMonth } },
+      data: { status: 'open', closedAt: null, statusChangedAt: new Date() },
+    });
+    return toSnapshotResponse(reopened);
   }
 
   private getPriorYearMonth(ym: string): string {

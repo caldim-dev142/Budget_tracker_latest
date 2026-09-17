@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/widgets/lock_gate.dart';
+import 'core/widgets/offline_banner.dart';
 import 'features/settings/providers/settings_providers.dart';
 
 class BudgetTrackerApp extends ConsumerWidget {
@@ -24,8 +25,10 @@ class BudgetTrackerApp extends ConsumerWidget {
       darkTheme: AppTheme.dark(),
       themeMode: themeMode,
 
-      // Security Gate
-      builder: (context, child) => LockGate(child: child ?? const SizedBox.shrink()),
+      // Security Gate & Offline Banner
+      builder: (context, child) => LockGate(
+        child: OfflineBanner(child: child ?? const SizedBox.shrink()),
+      ),
 
       // Routing
       routerConfig: router,

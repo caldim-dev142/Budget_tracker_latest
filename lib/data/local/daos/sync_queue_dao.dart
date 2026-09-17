@@ -28,6 +28,60 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase> with _$SyncQueueDaoMixi
     );
   }
 
+  /// Entity names accepted by the server's `deletions[]` sync protocol (SyncDeletionDto).
+  static const deletableEntities = {
+    'planned_bill',
+    'receivable',
+    'card_transaction',
+    'budget',
+    'reserve_line',
+    'goal_contribution',
+    'fund_movement',
+    'annual_target',
+    'category',
+  };
+
+  /// Records a hard deletion so the next push sends it in `deletions[]` (DEF-SYNC-01).
+  /// Must be called before (or in the same transaction as) the local delete.
+  Future<void> enqueueDeletion({required String entity, required String entityId}) {
+    assert(deletableEntities.contains(entity), 'Unsupported deletion entity: $entity');
+    return into(syncQueueTable).insert(
+      SyncQueueTableCompanion.insert(
+        id: 'delete:$entity:$entityId',
+        op: 'delete',
+        entity: entity,
+        entityId: entityId,
+        payload: jsonEncode({'id': entityId}),
+        createdAt: DateTime.now(),
+      ),
+      mode: InsertMode.insertOrReplace,
+    );
+  }
+
+  /// Queued ops that keep failing are not retried automatically after this many attempts;
+  /// they stay in the queue (and in [pendingCount]) so they remain visible.
+  static const maxAttempts = 10;
+
+  /// Records the latest local close/reopen of a month until the server has accepted it
+  /// (DEF-SYNC-07). One row per month: a newer action replaces an unsent older one.
+  Future<void> enqueueMonthStatus({
+    required String householdId,
+    required String yearMonth,
+    required bool closed,
+  }) {
+    return into(syncQueueTable).insert(
+      SyncQueueTableCompanion.insert(
+        id: 'month_status:$householdId:$yearMonth',
+        op: closed ? 'close' : 'reopen',
+        entity: 'month_status',
+        entityId: yearMonth,
+        payload: jsonEncode({'householdId': householdId, 'yearMonth': yearMonth}),
+        createdAt: DateTime.now(),
+      ),
+      mode: InsertMode.insertOrReplace,
+    );
+  }
+
   /// Get all unsynced ops, ordered by creation time.
   Future<List<SyncQueueTableData>> getPending() {
     return (select(syncQueueTable)
@@ -43,8 +97,11 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase> with _$SyncQueueDaoMixi
   }
 
   Future<void> incrementAttempts(String id) {
-    return (update(syncQueueTable)..where((s) => s.id.equals(id))).write(
-      const SyncQueueTableCompanion(attempts: Value.absent()),
+    // Value.absent() wrote nothing, so the attempt counter never changed.
+    return customUpdate(
+      'UPDATE sync_queue SET attempts = attempts + 1 WHERE id = ?',
+      variables: [Variable.withString(id)],
+      updates: {syncQueueTable},
     );
   }
 

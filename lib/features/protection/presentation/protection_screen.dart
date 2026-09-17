@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../../core/utils/money.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
@@ -53,7 +55,7 @@ class ProtectionScreen extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 120, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
         data: (funds) {
           if (funds.isEmpty) {
             return Center(
@@ -116,7 +118,7 @@ class ProtectionScreen extends ConsumerWidget {
 
   void _showAddFundDialog(BuildContext context, WidgetRef ref) {
     final nameCtrl = TextEditingController();
-    final reserveCtrl = TextEditingController(text: '0');
+    final reserveCtrl = TextEditingController();
 
     showDialog(
       context: context,
@@ -138,8 +140,10 @@ class ProtectionScreen extends ConsumerWidget {
             TextField(
               controller: reserveCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Opening Reserve (₹)',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -154,7 +158,10 @@ class ProtectionScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a fund name.');
+                return;
+              }
 
               final reserve =
                   ((double.tryParse(reserveCtrl.text) ?? 0) * 100).round();
@@ -210,13 +217,7 @@ class ProtectionScreen extends ConsumerWidget {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Fund "$name" created!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, 'Fund "$name" created!');
               }
             },
             child: const Text('Save'),
@@ -245,14 +246,17 @@ class ProtectionScreen extends ConsumerWidget {
               controller: nameCtrl,
               decoration: const InputDecoration(
                 labelText: 'Fund Name *',
+                hintText: 'e.g. Insurance, Medical Emergency',
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: reserveCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Opening Reserve (₹)',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -267,7 +271,10 @@ class ProtectionScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a fund name.');
+                return;
+              }
 
               final reserve =
                   ((double.tryParse(reserveCtrl.text) ?? 0) * 100).round();
@@ -282,13 +289,7 @@ class ProtectionScreen extends ConsumerWidget {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Fund "$name" updated!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, 'Fund "$name" updated!');
               }
             },
             child: const Text('Save'),
@@ -312,7 +313,7 @@ class _SinkingFundCard extends ConsumerWidget {
 
     return movementsAsync.when(
       loading: () => const Card(child: Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator())),
-      error: (e, _) => Card(child: Text('Error: $e')),
+      error: (e, _) => Card(child: Text(AppFeedback.formatError(e))),
       data: (movements) {
         int contributionPaise = 0;
         int withdrawalPaise = 0;
@@ -445,8 +446,10 @@ class _SinkingFundCard extends ConsumerWidget {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: InputDecoration(
                 labelText: '${isContrib ? 'Contribution' : 'Withdrawal'} Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -455,6 +458,7 @@ class _SinkingFundCard extends ConsumerWidget {
               controller: noteCtrl,
               decoration: const InputDecoration(
                 labelText: 'Note (optional)',
+                hintText: 'e.g. Annual premium deposit',
               ),
             ),
           ],
@@ -468,7 +472,10 @@ class _SinkingFundCard extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              if (amount <= 0) return;
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
               final amountPaise = (amount * 100).round();
               final db = ref.read(appDatabaseProvider);
 
@@ -520,15 +527,11 @@ class _SinkingFundCard extends ConsumerWidget {
                 ),
               );
 
+              ref.read(syncServiceProvider).triggerSync();
+
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('${isContrib ? 'Contribution' : 'Withdrawal'} of ₹$amount recorded!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, '${isContrib ? 'Contribution' : 'Withdrawal'} of ₹${amount.toStringAsFixed(2)} recorded!');
               }
             },
             child: const Text('Save'),
@@ -543,21 +546,12 @@ class _SinkingFundCard extends ConsumerWidget {
     WidgetRef ref,
     SinkingFundsTableData fund,
   ) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Sinking Fund?'),
-        content: Text('Remove fund "${fund.name}"? This action soft-deletes the fund reserve.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Sinking Fund?',
+      message: 'Remove fund "${fund.name}"? This action soft-deletes the fund reserve.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirm == true) {
@@ -566,13 +560,7 @@ class _SinkingFundCard extends ConsumerWidget {
           .write(SinkingFundsTableCompanion(archivedAt: Value(DateTime.now())));
       ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Fund "${fund.name}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Fund "${fund.name}" deleted.');
       }
     }
   }
@@ -633,9 +621,23 @@ class _SinkingFundCard extends ConsumerWidget {
                               IconButton(
                                 icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
                                 onPressed: () async {
-                                  final db = ref.read(appDatabaseProvider);
-                                  await (db.delete(db.fundMovementsTable)..where((fm) => fm.id.equals(m.id))).go();
-                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  final confirm = await AppFeedback.showConfirmDialog(
+                                    context,
+                                    title: 'Delete Movement',
+                                    message: 'Are you sure you want to delete this fund movement?',
+                                    confirmLabel: 'Delete',
+                                    isDestructive: true,
+                                  );
+                                  if (confirm == true) {
+                                    final db = ref.read(appDatabaseProvider);
+                                    await db.syncQueueDao.enqueueDeletion(entity: 'fund_movement', entityId: m.id);
+                                    await (db.delete(db.fundMovementsTable)..where((fm) => fm.id.equals(m.id))).go();
+                                    ref.read(syncServiceProvider).triggerSync();
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    if (context.mounted) {
+                                      AppFeedback.showSuccess(context, 'Movement deleted.');
+                                    }
+                                  }
                                 },
                               ),
                             ],
@@ -665,7 +667,12 @@ class _SinkingFundCard extends ConsumerWidget {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount (₹) *', prefixText: '₹ '),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
+              decoration: const InputDecoration(
+                labelText: 'Amount (₹) *',
+                hintText: '0.00',
+                prefixText: '₹ ',
+              ),
             ),
           ],
         ),
@@ -675,15 +682,22 @@ class _SinkingFundCard extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amt = double.tryParse(amountCtrl.text) ?? 0;
-              if (amt <= 0) return;
+              if (amt <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
 
               final db = ref.read(appDatabaseProvider);
               await (db.update(db.fundMovementsTable)..where((fm) => fm.id.equals(m.id)))
                   .write(FundMovementsTableCompanion(
                 amountPaise: Value((amt * 100).round()),
               ));
+              ref.read(syncServiceProvider).triggerSync();
 
-              if (context.mounted) Navigator.pop(context);
+              if (context.mounted) {
+                Navigator.pop(context);
+                AppFeedback.showSuccess(context, 'Movement updated!');
+              }
             },
             child: const Text('Save'),
           ),

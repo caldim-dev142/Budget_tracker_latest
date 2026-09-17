@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../core/utils/money.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
@@ -95,7 +97,16 @@ class _PlannedBillsTab extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 100, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              AppFeedback.formatError(e),
+              style: TextStyle(color: cs.error, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
         data: (bills) {
           if (bills.isEmpty) {
             return Center(
@@ -228,7 +239,7 @@ class _PlannedBillsTab extends ConsumerWidget {
                                   IconButton(
                                     icon: const Icon(Icons.check_circle_outline_rounded),
                                     tooltip: 'Mark Paid',
-                                    onPressed: () => _markPaid(ref, bill),
+                                    onPressed: () => _markPaid(context, ref, bill),
                                   ),
                                 PopupMenuButton<String>(
                                   onSelected: (v) {
@@ -283,8 +294,10 @@ class _PlannedBillsTab extends ConsumerWidget {
                 controller: amountCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
                 decoration: const InputDecoration(
                   labelText: 'Amount (₹) *',
+                  hintText: '0.00',
                   prefixText: '₹ ',
                 ),
               ),
@@ -317,29 +330,37 @@ class _PlannedBillsTab extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a bill name.');
+                  return;
+                }
                 final amount = double.tryParse(amountCtrl.text) ?? 0;
-                if (name.isEmpty || amount <= 0) return;
+                if (amount <= 0) {
+                  AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                  return;
+                }
 
-                final db = ref.read(appDatabaseProvider);
-                final auth = ref.read(authStateProvider).valueOrNull;
-                final householdId = auth?.householdId ?? 'local';
+                try {
+                  final db = ref.read(appDatabaseProvider);
+                  final auth = ref.read(authStateProvider).valueOrNull;
+                  final householdId = auth?.householdId ?? 'local';
 
-                await db.borrowLendDao.upsertPlannedBill(
-                  householdId: householdId,
-                  name: name,
-                  amountPaise: (amount * 100).round(),
-                  dueDate: dueDate,
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Bill "$name" added!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
+                  await db.borrowLendDao.upsertPlannedBill(
+                    householdId: householdId,
+                    name: name,
+                    amountPaise: (amount * 100).round(),
+                    dueDate: dueDate,
                   );
+                  ref.read(syncServiceProvider).triggerSync();
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Bill "$name" added!');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to save bill', error: e);
+                  }
                 }
               },
               child: const Text('Save'),
@@ -367,14 +388,19 @@ class _PlannedBillsTab extends ConsumerWidget {
               children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Bill Name *'),
+                decoration: const InputDecoration(
+                  labelText: 'Bill Name *',
+                  hintText: 'e.g. Electricity Bill',
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: amountCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
                 decoration: const InputDecoration(
                   labelText: 'Amount (₹) *',
+                  hintText: '0.00',
                   prefixText: '₹ ',
                 ),
               ),
@@ -407,31 +433,39 @@ class _PlannedBillsTab extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a bill name.');
+                  return;
+                }
                 final amount = double.tryParse(amountCtrl.text) ?? 0;
-                if (name.isEmpty || amount <= 0) return;
+                if (amount <= 0) {
+                  AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                  return;
+                }
 
-                final db = ref.read(appDatabaseProvider);
-                final auth = ref.read(authStateProvider).valueOrNull;
-                final householdId = auth?.householdId ?? 'local';
+                try {
+                  final db = ref.read(appDatabaseProvider);
+                  final auth = ref.read(authStateProvider).valueOrNull;
+                  final householdId = auth?.householdId ?? 'local';
 
-                await db.borrowLendDao.upsertPlannedBill(
-                  householdId: householdId,
-                  id: bill.id,
-                  name: name,
-                  amountPaise: (amount * 100).round(),
-                  dueDate: dueDate,
-                  existingEntryId: bill.entryId,
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Bill "$name" updated!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
+                  await db.borrowLendDao.upsertPlannedBill(
+                    householdId: householdId,
+                    id: bill.id,
+                    name: name,
+                    amountPaise: (amount * 100).round(),
+                    dueDate: dueDate,
+                    existingEntryId: bill.entryId,
                   );
+                  ref.read(syncServiceProvider).triggerSync();
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Bill "$name" updated!');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to update bill', error: e);
+                  }
                 }
               },
               child: const Text('Save'),
@@ -442,40 +476,36 @@ class _PlannedBillsTab extends ConsumerWidget {
     );
   }
 
-  Future<void> _markPaid(WidgetRef ref, PlannedBillsTableData bill) async {
+  Future<void> _markPaid(BuildContext context, WidgetRef ref, PlannedBillsTableData bill) async {
     final db = ref.read(appDatabaseProvider);
     await db.borrowLendDao.settlePlannedBill(bill.id);
+    ref.read(syncServiceProvider).triggerSync();
+    if (context.mounted) {
+      AppFeedback.showSuccess(context, 'Marked "${bill.name}" as paid.');
+    }
   }
 
   Future<void> _deleteBill(BuildContext context, WidgetRef ref, PlannedBillsTableData bill) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Planned Bill?'),
-        content: Text('Remove "${bill.name}" from your planned bills?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Planned Bill',
+      message: 'Remove "${bill.name}" from your planned bills?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirm == true) {
-      final db = ref.read(appDatabaseProvider);
-      await db.borrowLendDao.deletePlannedBill(bill.id);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Bill "${bill.name}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+      try {
+        final db = ref.read(appDatabaseProvider);
+        await db.borrowLendDao.deletePlannedBill(bill.id);
+        ref.read(syncServiceProvider).triggerSync();
+        if (context.mounted) {
+          AppFeedback.showSuccess(context, 'Bill "${bill.name}" deleted.');
+        }
+      } catch (e) {
+        if (context.mounted) {
+          AppFeedback.showError(context, 'Failed to delete bill', error: e);
+        }
       }
     }
   }
@@ -497,7 +527,16 @@ class _ReserveLinesTab extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 100, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              AppFeedback.formatError(e),
+              style: TextStyle(color: cs.error, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
         data: (reserves) {
           final total = reserves.fold<int>(0, (s, r) => s + r.amountPaise);
 
@@ -615,14 +654,21 @@ class _ReserveLinesTab extends ConsumerWidget {
             children: [
             TextField(
               controller: nameCtrl,
-              decoration: const InputDecoration(labelText: 'Reserve Name *'),
+              decoration: const InputDecoration(
+                labelText: 'Reserve Name *',
+                hintText: 'e.g. Emergency Buffer, Tax Reserve',
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
-                  labelText: 'Amount (₹) *', prefixText: '₹ '),
+                labelText: 'Amount (₹) *',
+                hintText: '0.00',
+                prefixText: '₹ ',
+              ),
             ),
           ],
         ),
@@ -635,28 +681,44 @@ class _ReserveLinesTab extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a reserve name.');
+                return;
+              }
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              if (name.isEmpty || amount <= 0) return;
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                return;
+              }
 
-              final db = ref.read(appDatabaseProvider);
-              final auth = ref.read(authStateProvider).valueOrNull;
-              final householdId = auth?.householdId ?? 'local';
-              final now = DateTime.now();
-              final ym =
-                  '${now.year}-${now.month.toString().padLeft(2, '0')}';
+              try {
+                final db = ref.read(appDatabaseProvider);
+                final auth = ref.read(authStateProvider).valueOrNull;
+                final householdId = auth?.householdId ?? 'local';
+                final now = DateTime.now();
+                final ym =
+                    '${now.year}-${now.month.toString().padLeft(2, '0')}';
 
-              await db.into(db.reserveLinesTable).insert(
-                ReserveLinesTableCompanion.insert(
-                  id: _uuid.v4(),
-                  householdId: householdId,
-                  yearMonth: ym,
-                  name: name,
-                  amountPaise: (amount * 100).round(),
-                  source: const Value('manual'),
-                ),
-              );
+                await db.into(db.reserveLinesTable).insert(
+                  ReserveLinesTableCompanion.insert(
+                    id: _uuid.v4(),
+                    householdId: householdId,
+                    yearMonth: ym,
+                    name: name,
+                    amountPaise: (amount * 100).round(),
+                    source: const Value('manual'),
+                  ),
+                );
 
-              if (context.mounted) Navigator.pop(context);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  AppFeedback.showSuccess(context, 'Reserve line "$name" added!');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  AppFeedback.showError(context, 'Failed to add reserve line', error: e);
+                }
+              }
             },
             child: const Text('Save'),
           ),
@@ -666,34 +728,21 @@ class _ReserveLinesTab extends ConsumerWidget {
   }
 
   Future<void> _deleteReserve(BuildContext context, WidgetRef ref, ReserveLinesTableData line) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Reserve Line?'),
-        content: Text('Remove "${line.name}" from your reserves register?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Reserve Line?',
+      message: 'Remove "${line.name}" from your reserves register?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirm == true) {
       final db = ref.read(appDatabaseProvider);
+      await db.syncQueueDao.enqueueDeletion(entity: 'reserve_line', entityId: line.id);
       await (db.delete(db.reserveLinesTable)..where((r) => r.id.equals(line.id))).go();
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Reserve line "${line.name}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Reserve line "${line.name}" deleted.');
       }
     }
   }
@@ -713,14 +762,19 @@ class _ReserveLinesTab extends ConsumerWidget {
             children: [
             TextField(
               controller: nameCtrl,
-              decoration: const InputDecoration(labelText: 'Reserve Name *'),
+              decoration: const InputDecoration(
+                labelText: 'Reserve Name *',
+                hintText: 'e.g. Emergency Buffer',
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -735,8 +789,15 @@ class _ReserveLinesTab extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a reserve name.');
+                return;
+              }
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              if (name.isEmpty || amount <= 0) return;
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                return;
+              }
 
               final db = ref.read(appDatabaseProvider);
               await (db.update(db.reserveLinesTable)..where((r) => r.id.equals(line.id)))
@@ -747,13 +808,7 @@ class _ReserveLinesTab extends ConsumerWidget {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Reserve line "$name" updated!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, 'Reserve line "$name" updated!');
               }
             },
             child: const Text('Save'),
@@ -780,7 +835,16 @@ class _ReceivablesTab extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 100, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              AppFeedback.formatError(e),
+              style: TextStyle(color: cs.error, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
         data: (receivables) {
           final total =
               receivables.fold<int>(0, (s, r) => s + r.amountPaise);
@@ -890,7 +954,7 @@ class _ReceivablesTab extends ConsumerWidget {
                                       IconButton(
                                         icon: const Icon(Icons.check_circle_outline_rounded),
                                         tooltip: 'Mark Returned',
-                                        onPressed: () => _markReturned(ref, rec),
+                                        onPressed: () => _markReturned(context, ref, rec),
                                       ),
                                       PopupMenuButton<String>(
                                         onSelected: (v) {
@@ -945,8 +1009,10 @@ class _ReceivablesTab extends ConsumerWidget {
                 controller: amountCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
                 decoration: const InputDecoration(
                   labelText: 'Amount (₹) *',
+                  hintText: '0.00',
                   prefixText: '₹ ',
                 ),
               ),
@@ -979,29 +1045,37 @@ class _ReceivablesTab extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a person name.');
+                  return;
+                }
                 final amount = double.tryParse(amountCtrl.text) ?? 0;
-                if (name.isEmpty || amount <= 0) return;
+                if (amount <= 0) {
+                  AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                  return;
+                }
 
-                final db = ref.read(appDatabaseProvider);
-                final auth = ref.read(authStateProvider).valueOrNull;
-                final householdId = auth?.householdId ?? 'local';
+                try {
+                  final db = ref.read(appDatabaseProvider);
+                  final auth = ref.read(authStateProvider).valueOrNull;
+                  final householdId = auth?.householdId ?? 'local';
 
-                await db.borrowLendDao.upsertReceivable(
-                  householdId: householdId,
-                  personName: name,
-                  amountPaise: (amount * 100).round(),
-                  dueDate: dueDate,
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Receivable from $name added!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
+                  await db.borrowLendDao.upsertReceivable(
+                    householdId: householdId,
+                    personName: name,
+                    amountPaise: (amount * 100).round(),
+                    dueDate: dueDate,
                   );
+                  ref.read(syncServiceProvider).triggerSync();
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Receivable from $name added!');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to add receivable', error: e);
+                  }
                 }
               },
               child: const Text('Save'),
@@ -1029,14 +1103,19 @@ class _ReceivablesTab extends ConsumerWidget {
               children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Person Name *'),
+                decoration: const InputDecoration(
+                  labelText: 'Person Name *',
+                  hintText: 'Who owes you money?',
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: amountCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
                 decoration: const InputDecoration(
                   labelText: 'Amount (₹) *',
+                  hintText: '0.00',
                   prefixText: '₹ ',
                 ),
               ),
@@ -1069,32 +1148,39 @@ class _ReceivablesTab extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a person name.');
+                  return;
+                }
                 final amount = double.tryParse(amountCtrl.text) ?? 0;
-                if (name.isEmpty || amount <= 0) return;
+                if (amount <= 0) {
+                  AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                  return;
+                }
 
-                final db = ref.read(appDatabaseProvider);
-                final auth = ref.read(authStateProvider).valueOrNull;
-                final householdId = auth?.householdId ?? 'local';
+                try {
+                  final db = ref.read(appDatabaseProvider);
+                  final auth = ref.read(authStateProvider).valueOrNull;
+                  final householdId = auth?.householdId ?? 'local';
 
-                await db.borrowLendDao.upsertReceivable(
-                  householdId: householdId,
-                  id: rec.id,
-                  personName: name,
-                  amountPaise: (amount * 100).round(),
-                  dueDate: dueDate,
-                  existingEntryId: rec.entryId,
-                );
-                ref.read(syncServiceProvider).triggerSync();
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Receivable for "$name" updated!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
+                  await db.borrowLendDao.upsertReceivable(
+                    householdId: householdId,
+                    id: rec.id,
+                    personName: name,
+                    amountPaise: (amount * 100).round(),
+                    dueDate: dueDate,
+                    existingEntryId: rec.entryId,
                   );
+                  ref.read(syncServiceProvider).triggerSync();
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Receivable for "$name" updated!');
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to update receivable', error: e);
+                  }
                 }
               },
               child: const Text('Save'),
@@ -1106,42 +1192,37 @@ class _ReceivablesTab extends ConsumerWidget {
   }
 
   Future<void> _markReturned(
-      WidgetRef ref, ReceivablesTableData rec) async {
+      BuildContext context, WidgetRef ref, ReceivablesTableData rec) async {
     final db = ref.read(appDatabaseProvider);
     await db.borrowLendDao.settleReceivable(rec.id);
     ref.read(syncServiceProvider).triggerSync();
+    if (context.mounted) {
+      AppFeedback.showSuccess(context, 'Marked receivable from "${rec.personName}" as returned.');
+    }
   }
 
   Future<void> _deleteReceivable(
       BuildContext context, WidgetRef ref, ReceivablesTableData rec) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Receivable?'),
-        content: Text('Remove receivable from "${rec.personName}"?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Receivable',
+      message: 'Remove receivable from "${rec.personName}"?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirm == true) {
-      final db = ref.read(appDatabaseProvider);
-      await db.borrowLendDao.deleteReceivable(rec.id);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Receivable from "${rec.personName}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+      try {
+        final db = ref.read(appDatabaseProvider);
+        await db.borrowLendDao.deleteReceivable(rec.id);
+        ref.read(syncServiceProvider).triggerSync();
+        if (context.mounted) {
+          AppFeedback.showSuccess(context, 'Receivable from "${rec.personName}" deleted.');
+        }
+      } catch (e) {
+        if (context.mounted) {
+          AppFeedback.showError(context, 'Failed to delete receivable', error: e);
+        }
       }
     }
   }
@@ -1175,7 +1256,16 @@ class _AnnualPlanTab extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 100, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              AppFeedback.formatError(e),
+              style: TextStyle(color: cs.error, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
         data: (items) {
           if (items.isEmpty) {
             return Center(
@@ -1185,61 +1275,138 @@ class _AnnualPlanTab extends ConsumerWidget {
                   Icon(Icons.flag_outlined, size: 56, color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
                   const SizedBox(height: 16),
                   Text('No annual targets configured yet', style: TextStyle(color: cs.onSurfaceVariant)),
+                  const SizedBox(height: 8),
+                  Text('Tap + Add Target below to set your first goal.',
+                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
                 ],
               ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-            itemCount: items.length,
-            itemBuilder: (_, i) {
-              final item = items[i];
-              final isIncome = item.type == 'income';
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: PressableScale(
-                  borderRadius: BorderRadius.circular(18),
-                  child: Card(
-                    child: ListTile(
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: (isIncome ? Colors.green : cs.primary).withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
+          // Compute summary aggregates
+          final incomeTargetPaise = items
+              .where((i) => i.type == 'income')
+              .fold<int>(0, (s, i) => s + i.targetPaise);
+          final expenseTargetPaise = items
+              .where((i) => i.type == 'expense')
+              .fold<int>(0, (s, i) => s + i.targetPaise);
+          final netSavingsPaise = incomeTargetPaise - expenseTargetPaise;
+
+          return Column(
+            children: [
+              // ── Summary Header Card ────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'ANNUAL PLAN SUMMARY',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.8,
+                              ),
                         ),
-                        child: Icon(
-                          isIncome ? Icons.trending_up_rounded : Icons.account_balance_wallet_outlined,
-                          color: isIncome ? Colors.green : cs.primary,
-                          size: 20,
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _AnnualSummaryTile(
+                                label: 'Income Target',
+                                amount: Money(incomeTargetPaise),
+                                color: const Color(0xFF00A887),
+                                icon: Icons.trending_up_rounded,
+                              ),
+                            ),
+                            Expanded(
+                              child: _AnnualSummaryTile(
+                                label: 'Expense Budget',
+                                amount: Money(expenseTargetPaise),
+                                color: cs.error,
+                                icon: Icons.account_balance_wallet_outlined,
+                              ),
+                            ),
+                            Expanded(
+                              child: _AnnualSummaryTile(
+                                label: 'Net Savings',
+                                amount: Money(netSavingsPaise),
+                                color: netSavingsPaise >= 0
+                                    ? const Color(0xFF8B5CF6)
+                                    : cs.error,
+                                icon: Icons.savings_outlined,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text(isIncome ? 'Income Target' : 'Expense Budget', style: TextStyle(color: cs.onSurfaceVariant)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          MoneyText(
-                            Money(item.targetPaise),
-                            style: TextStyle(color: isIncome ? Colors.green : cs.primary, fontWeight: FontWeight.w700),
-                          ),
-                          PopupMenuButton<String>(
-                            onSelected: (v) {
-                              if (v == 'edit') _showEditAnnualItemDialog(context, ref, item);
-                              if (v == 'delete') _deleteAnnualItem(context, ref, item);
-                            },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(value: 'edit', child: Text('Edit Target')),
-                              PopupMenuItem(value: 'delete', child: Text('Delete Target')),
-                            ],
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
                 ),
-              );
-            },
+              ),
+              const SizedBox(height: 4),
+              // ── Items List ────────────────────────────────────────────────
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                  itemCount: items.length,
+                  itemBuilder: (_, i) {
+                    final item = items[i];
+                    final isIncome = item.type == 'income';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: PressableScale(
+                        borderRadius: BorderRadius.circular(18),
+                        child: Card(
+                          child: ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: (isIncome ? const Color(0xFF00A887) : cs.primary).withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                isIncome ? Icons.trending_up_rounded : Icons.account_balance_wallet_outlined,
+                                color: isIncome ? const Color(0xFF00A887) : cs.primary,
+                                size: 20,
+                              ),
+                            ),
+                            title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            subtitle: Text(isIncome ? 'Income Target' : 'Expense Budget', style: TextStyle(color: cs.onSurfaceVariant)),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                MoneyText(
+                                  Money(item.targetPaise),
+                                  style: TextStyle(
+                                    color: isIncome ? const Color(0xFF00A887) : cs.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                PopupMenuButton<String>(
+                                  onSelected: (v) {
+                                    if (v == 'edit') _showEditAnnualItemDialog(context, ref, item);
+                                    if (v == 'delete') _deleteAnnualItem(context, ref, item);
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(value: 'edit', child: Text('Edit Target')),
+                                    PopupMenuItem(value: 'delete', child: Text('Delete Target')),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -1261,12 +1428,23 @@ class _AnnualPlanTab extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Target Title *')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Target Title *',
+                  hintText: 'e.g. Annual Bonus, Health Insurance, Vacation',
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: amountCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Amount (₹) *', prefixText: '₹ '),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
+                decoration: const InputDecoration(
+                  labelText: 'Amount (₹) *',
+                  hintText: '0.00',
+                  prefixText: '₹ ',
+                ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -1288,8 +1466,15 @@ class _AnnualPlanTab extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final title = titleCtrl.text.trim();
+                if (title.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a target title.');
+                  return;
+                }
                 final amt = double.tryParse(amountCtrl.text) ?? 0;
-                if (title.isEmpty || amt <= 0) return;
+                if (amt <= 0) {
+                  AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                  return;
+                }
 
                 final db = ref.read(appDatabaseProvider);
                 final auth = ref.read(authStateProvider).valueOrNull;
@@ -1304,16 +1489,11 @@ class _AnnualPlanTab extends ConsumerWidget {
                     type: Value(type),
                   ),
                 );
+                ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Target "$title" added!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  AppFeedback.showSuccess(context, 'Target "$title" added!');
                 }
               },
               child: const Text('Save'),
@@ -1339,12 +1519,23 @@ class _AnnualPlanTab extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Target Title *')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Target Title *',
+                  hintText: 'e.g. Annual Bonus, Health Insurance, Vacation',
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: amountCtrl,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Amount (₹) *', prefixText: '₹ '),
+                inputFormatters: [AppInputFormatters.positiveDecimal()],
+                decoration: const InputDecoration(
+                  labelText: 'Amount (₹) *',
+                  hintText: '0.00',
+                  prefixText: '₹ ',
+                ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -1366,8 +1557,15 @@ class _AnnualPlanTab extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final title = titleCtrl.text.trim();
+                if (title.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a target title.');
+                  return;
+                }
                 final amt = double.tryParse(amountCtrl.text) ?? 0;
-                if (title.isEmpty || amt <= 0) return;
+                if (amt <= 0) {
+                  AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+                  return;
+                }
 
                 final db = ref.read(appDatabaseProvider);
                 await (db.update(db.annualTargetsTable)..where((t) => t.id.equals(item.id)))
@@ -1376,16 +1574,11 @@ class _AnnualPlanTab extends ConsumerWidget {
                   targetPaise: Value((amt * 100).round()),
                   type: Value(type),
                 ));
+                ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Target "$title" updated!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  AppFeedback.showSuccess(context, 'Target "$title" updated!');
                 }
               },
               child: const Text('Save'),
@@ -1397,36 +1590,85 @@ class _AnnualPlanTab extends ConsumerWidget {
   }
 
   Future<void> _deleteAnnualItem(BuildContext context, WidgetRef ref, AnnualTargetsTableData item) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Target?'),
-        content: Text('Remove annual target "${item.title}"?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Target',
+      message: 'Remove annual target "${item.title}"?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirm == true) {
-      final db = ref.read(appDatabaseProvider);
-      await (db.delete(db.annualTargetsTable)..where((t) => t.id.equals(item.id))).go();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Target "${item.title}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+      try {
+        final db = ref.read(appDatabaseProvider);
+        // Enqueue delete into syncQueue BEFORE local deletion so backend
+        // removes it on next push and it is not resurrected on pull.
+        await db.syncQueueDao.enqueueDeletion(entity: 'annual_target', entityId: item.id);
+        await (db.delete(db.annualTargetsTable)..where((t) => t.id.equals(item.id))).go();
+        ref.read(syncServiceProvider).triggerSync();
+        if (context.mounted) {
+          AppFeedback.showSuccess(context, 'Target "${item.title}" deleted.');
+        }
+      } catch (e) {
+        if (context.mounted) {
+          AppFeedback.showError(context, 'Failed to delete target', error: e);
+        }
       }
     }
+  }
+}
+
+// ─── Annual Summary Tile ──────────────────────────────────────────────────────
+
+class _AnnualSummaryTile extends StatelessWidget {
+  final String label;
+  final Money amount;
+  final Color color;
+  final IconData icon;
+
+  const _AnnualSummaryTile({
+    required this.label,
+    required this.amount,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: TextStyle(
+            color: cs.onSurfaceVariant,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 2),
+        MoneyText(
+          amount,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
   }
 }
 

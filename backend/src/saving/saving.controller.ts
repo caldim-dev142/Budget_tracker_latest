@@ -2,10 +2,11 @@ import { Controller, Get, Post, Body, Param, UseGuards, Req } from '@nestjs/comm
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SavingService } from './saving.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { HouseholdGuard } from '../auth/guards/household.guard';
 
 @ApiTags('saving')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @Controller('saving')
 export class SavingController {
   constructor(private readonly savingService: SavingService) {}

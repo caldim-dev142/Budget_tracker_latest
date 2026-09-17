@@ -9,6 +9,7 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthService } from '../auth/auth.service';
 import { seedCategories } from '../categories/categories-seed.data';
+import { buildSystemCategoriesForHousehold } from '../categories/categories-system.data';
 
 @Injectable()
 export class HouseholdsService {
@@ -49,9 +50,9 @@ export class HouseholdsService {
       data: { household_id: householdId },
     });
 
-    // Seed default categories and accounts for this newly created household
+    // Seed default categories and system categories for this newly created household
     await this.seedCategoriesForHousehold(householdId);
-    await this.seedDefaultAccountsForHousehold(householdId);
+    await this.seedSystemCategoriesForHousehold(householdId);
 
     const tokens = await this.authService.issueTokens(user.id, householdId);
 
@@ -240,6 +241,7 @@ export class HouseholdsService {
 
       // 2. Cascade cleanup of household records to avoid orphaned data
       await tx.monthSnapshot.deleteMany({ where: { householdId: targetHouseholdId } });
+      await tx.syncTombstone.deleteMany({ where: { householdId: targetHouseholdId } });
       await tx.budget.deleteMany({ where: { householdId: targetHouseholdId } });
       await tx.entry.deleteMany({ where: { householdId: targetHouseholdId } });
       await tx.category.deleteMany({ where: { householdId: targetHouseholdId } });
@@ -354,16 +356,18 @@ export class HouseholdsService {
     } catch (_) {}
   }
 
-  private async seedDefaultAccountsForHousehold(householdId: string) {
-    // Remove any stale default accounts seeded by older app versions.
-    // Accounts are now created explicitly by the user only.
+  /**
+   * Seed the 4 internal system categories required for borrow/lending and planning settlement.
+   * Idempotent — safe to call multiple times (skipDuplicates).
+   */
+  private async seedSystemCategoriesForHousehold(householdId: string) {
     try {
-      await this.prisma.account.deleteMany({
-        where: {
-          householdId,
-          name: { in: ['Savings Account', 'Cash Wallet'] },
-        },
+      const data = buildSystemCategoriesForHousehold(householdId);
+      await this.prisma.category.createMany({
+        data,
+        skipDuplicates: true,
       });
     } catch (_) {}
   }
+
 }

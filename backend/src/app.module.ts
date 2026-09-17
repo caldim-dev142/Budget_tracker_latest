@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
-import Joi from 'joi';
+import { envValidationSchema } from './config/env.validation';
 
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
@@ -26,20 +27,7 @@ import { EngineModule } from './engine/engine.module';
     // Config — Joi-validated env vars (doc 16 §1)
     ConfigModule.forRoot({
       isGlobal: true,
-      validationSchema: Joi.object({
-        NODE_ENV: Joi.string()
-          .valid('local', 'development', 'staging', 'production')
-          .default('local'),
-        PORT: Joi.number().default(3000),
-        DATABASE_URL: Joi.string().uri().required(),
-        JWT_ACCESS_SECRET: Joi.string().min(32).required(),
-        JWT_REFRESH_SECRET: Joi.string().min(32).required(),
-        JWT_ACCESS_EXPIRY: Joi.string().default('15m'),
-        JWT_REFRESH_EXPIRY: Joi.string().default('30d'),
-        CORS_ORIGINS: Joi.string().default('http://localhost:3000'),
-        REDIS_URL: Joi.string().optional(),
-        SENTRY_DSN: Joi.string().optional(),
-      }),
+      validationSchema: envValidationSchema,
     }),
 
     // Rate limiting — 100 req/min global (doc 12 §7)
@@ -65,6 +53,12 @@ import { EngineModule } from './engine/engine.module';
     ReportsModule,
     SyncModule,
     EngineModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

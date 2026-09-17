@@ -32,8 +32,8 @@ export const seedCategories: SeedCategory[] = [
   { id: 'adj-02', kind: 'adjustment', name: 'Borrow/Return(-)', isDeduction: false, isSystem: false, sortOrder: 2 },
   { id: 'adj-03', kind: 'adjustment', name: 'Temporary In/Out(-)', isDeduction: false, isSystem: false, sortOrder: 3 },
   { id: 'adj-04', kind: 'adjustment', name: 'Others(Inflow)', isDeduction: false, isSystem: false, sortOrder: 4 },
-  { id: 'adj-05', kind: 'adjustment', name: 'Lending/Return(-)', isDeduction: false, isSystem: false, sortOrder: 5 },
-  { id: 'adj-06', kind: 'adjustment', name: 'Others(Outflow)', isDeduction: false, isSystem: false, sortOrder: 6 },
+  { id: 'adj-05', kind: 'adjustment', name: 'Lending/Return(-)', isDeduction: true, isSystem: false, sortOrder: 5 },
+  { id: 'adj-06', kind: 'adjustment', name: 'Others(Outflow)', isDeduction: true, isSystem: false, sortOrder: 6 },
 
   // SPENDING - fees
   { id: 'spd-f01', kind: 'spending', groupCode: 'fees', name: 'Electricity Bill 1', needOrWant: 'need', isDeduction: false, isSystem: false, sortOrder: 1 },

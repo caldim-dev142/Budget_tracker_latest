@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../../core/utils/money.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
@@ -53,7 +55,7 @@ class CardsScreen extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 140, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
         data: (cards) {
           if (cards.isEmpty) {
             return Center(
@@ -123,7 +125,7 @@ class CardsScreen extends ConsumerWidget {
 
   void _showAddCardDialog(BuildContext context, WidgetRef ref) {
     final nameCtrl = TextEditingController();
-    final outstandingCtrl = TextEditingController(text: '0');
+    final outstandingCtrl = TextEditingController();
 
     showDialog(
       context: context,
@@ -145,8 +147,10 @@ class CardsScreen extends ConsumerWidget {
             TextField(
               controller: outstandingCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
-                labelText: 'Previous Outstanding (₹)',
+                labelText: 'Opening / Current Outstanding (₹)',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -161,34 +165,37 @@ class CardsScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a card name.');
+                return;
+              }
 
-              final outstanding =
-                  ((double.tryParse(outstandingCtrl.text) ?? 0) * 100).round();
-              final db = ref.read(appDatabaseProvider);
-              final auth = ref.read(authStateProvider).valueOrNull;
-              final householdId = auth?.householdId ?? 'local';
+              try {
+                final outstanding =
+                    ((double.tryParse(outstandingCtrl.text) ?? 0) * 100).round();
+                final db = ref.read(appDatabaseProvider);
+                final auth = ref.read(authStateProvider).valueOrNull;
+                final householdId = auth?.householdId ?? 'local';
 
-              await db.cardDao.upsertCard(
-                CreditCardsTableCompanion.insert(
-                  id: _uuid.v4(),
-                  householdId: householdId,
-                  name: name,
-                  previousOutstandingPaise: Value(outstanding),
-                  isActive: const Value(true),
-                ),
-              );
-              ref.read(syncServiceProvider).triggerSync();
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Card "$name" added!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                await db.cardDao.upsertCard(
+                  CreditCardsTableCompanion.insert(
+                    id: _uuid.v4(),
+                    householdId: householdId,
+                    name: name,
+                    previousOutstandingPaise: Value(outstanding),
+                    isActive: const Value(true),
                   ),
                 );
+                ref.read(syncServiceProvider).triggerSync();
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  AppFeedback.showSuccess(context, 'Card "$name" added!');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  AppFeedback.showError(context, 'Failed to add card', error: e);
+                }
               }
             },
             child: const Text('Save'),
@@ -218,14 +225,17 @@ class CardsScreen extends ConsumerWidget {
               controller: nameCtrl,
               decoration: const InputDecoration(
                 labelText: 'Card Name *',
+                hintText: 'e.g. HDFC Regalia',
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: outstandingCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Outstanding Balance (₹)',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -240,28 +250,31 @@ class CardsScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
+              if (name.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a card name.');
+                return;
+              }
 
-              final outstanding =
-                  ((double.tryParse(outstandingCtrl.text) ?? 0) * 100).round();
-              final db = ref.read(appDatabaseProvider);
+              try {
+                final outstanding =
+                    ((double.tryParse(outstandingCtrl.text) ?? 0) * 100).round();
+                final db = ref.read(appDatabaseProvider);
 
-              await (db.update(db.creditCardsTable)..where((c) => c.id.equals(card.id)))
-                  .write(CreditCardsTableCompanion(
-                    name: Value(name),
-                    previousOutstandingPaise: Value(outstanding),
-                  ));
-              ref.read(syncServiceProvider).triggerSync();
+                await (db.update(db.creditCardsTable)..where((c) => c.id.equals(card.id)))
+                    .write(CreditCardsTableCompanion(
+                      name: Value(name),
+                      previousOutstandingPaise: Value(outstanding),
+                    ));
+                ref.read(syncServiceProvider).triggerSync();
 
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Card "$name" updated!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  AppFeedback.showSuccess(context, 'Card "$name" updated!');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  AppFeedback.showError(context, 'Failed to update card', error: e);
+                }
               }
             },
             child: const Text('Save'),
@@ -288,8 +301,10 @@ class CardsScreen extends ConsumerWidget {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Payment Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -298,6 +313,7 @@ class CardsScreen extends ConsumerWidget {
               controller: noteCtrl,
               decoration: const InputDecoration(
                 labelText: 'Note (optional)',
+                hintText: 'e.g. Bank transfer, Bill pay',
               ),
             ),
           ],
@@ -311,32 +327,36 @@ class CardsScreen extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              if (amount <= 0) return;
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter a payment amount greater than zero.');
+                return;
+              }
 
-              final amountPaise = (amount * 100).round();
-              final db = ref.read(appDatabaseProvider);
+              try {
+                final amountPaise = (amount * 100).round();
+                final db = ref.read(appDatabaseProvider);
+                final cleanNote = noteCtrl.text.trim();
 
-              // Insert transaction (payment is negative, reducing current outstanding)
-              await db.cardDao.insertTransaction(
-                CardTransactionsTableCompanion.insert(
-                  id: _uuid.v4(),
-                  cardId: card.id,
-                  txnDate: DateTime.now(),
-                  description: noteCtrl.text.isEmpty ? 'Payment' : noteCtrl.text,
-                  amountPaise: -amountPaise,
-                ),
-              );
-              ref.read(syncServiceProvider).triggerSync();
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Payment of ₹$amount recorded!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                // Insert transaction (payment is negative, reducing current outstanding)
+                await db.cardDao.insertTransaction(
+                  CardTransactionsTableCompanion.insert(
+                    id: _uuid.v4(),
+                    cardId: card.id,
+                    txnDate: DateTime.now(),
+                    description: cleanNote.isEmpty ? 'Payment' : cleanNote,
+                    amountPaise: -amountPaise,
                   ),
                 );
+                ref.read(syncServiceProvider).triggerSync();
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  AppFeedback.showSuccess(context, 'Payment of ₹${amount.toStringAsFixed(2)} recorded!');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  AppFeedback.showError(context, 'Failed to record payment', error: e);
+                }
               }
             },
             child: const Text('Record'),
@@ -360,24 +380,12 @@ class CardsScreen extends ConsumerWidget {
 
   Future<void> _deleteCard(
       BuildContext context, WidgetRef ref, CreditCardsTableData card) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Remove Card'),
-        content: Text('Remove "${card.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Remove Card',
+      message: 'Are you sure you want to remove "${card.name}"?',
+      confirmLabel: 'Remove',
+      isDestructive: true,
     );
     if (confirmed == true) {
       final db = ref.read(appDatabaseProvider);
@@ -385,13 +393,16 @@ class CardsScreen extends ConsumerWidget {
             ..where((c) => c.id.equals(card.id)))
           .write(const CreditCardsTableCompanion(isActive: Value(false)));
       ref.read(syncServiceProvider).triggerSync();
+      if (context.mounted) {
+        AppFeedback.showSuccess(context, 'Card "${card.name}" removed.');
+      }
     }
   }
 }
 
 // ─── Card Widget ──────────────────────────────────────────────────────────────
 
-class _CreditCardWidget extends StatelessWidget {
+class _CreditCardWidget extends ConsumerWidget {
   final CreditCardsTableData card;
   final VoidCallback onRecordPayment;
   final VoidCallback onViewTransactions;
@@ -407,8 +418,17 @@ class _CreditCardWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
+    // `previousOutstandingPaise` is the card's fixed opening balance (every other reader —
+    // more_screen.dart, notifications_screen.dart, dashboard_providers.dart, and the backend's
+    // reports.service.ts — computes the live outstanding as previousOutstandingPaise + sum of
+    // transactions). This screen previously displayed the raw stored field with no transaction
+    // sum at all, so it never reflected a recorded payment (data-persistence audit fix,
+    // 2026-09-17). Computed the same way as every other consumer for consistency.
+    final txnsAsync = ref.watch(_cardTransactionsProvider(card.id));
+    final delta = txnsAsync.valueOrNull?.fold<int>(0, (s, t) => s + t.amountPaise) ?? 0;
+    final liveOutstanding = (card.previousOutstandingPaise + delta).clamp(0, 999999999);
     return PressableScale(
       borderRadius: BorderRadius.circular(18),
       child: Card(
@@ -486,7 +506,7 @@ class _CreditCardWidget extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       MoneyText(
-                        Money(card.previousOutstandingPaise),
+                        Money(liveOutstanding),
                         style: Theme.of(context)
                             .textTheme
                             .headlineMedium
@@ -569,7 +589,7 @@ class _CardTransactionsSheet extends ConsumerWidget {
           Expanded(
             child: txnsAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
+              error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
               data: (txns) {
                 if (txns.isEmpty) {
                   return const Center(child: Text('No transactions recorded yet'));
@@ -624,32 +644,30 @@ class _CardTransactionsSheet extends ConsumerWidget {
                           IconButton(
                             icon: Icon(Icons.delete_outline_rounded, size: 18, color: Theme.of(context).colorScheme.error),
                             onPressed: () async {
-                              final confirm = await showDialog<bool>(
-                                context: context,
-                                builder: (ctx) => AlertDialog(
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                  title: const Text('Delete Transaction?'),
-                                  content: Text('Delete "${t.description}"?'),
-                                  actions: [
-                                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                    FilledButton(
-                                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                                      onPressed: () => Navigator.pop(ctx, true),
-                                      child: const Text('Delete'),
-                                    ),
-                                  ],
-                                ),
+                              final confirm = await AppFeedback.showConfirmDialog(
+                                context,
+                                title: 'Delete Transaction',
+                                message: 'Delete "${t.description}"?',
+                                confirmLabel: 'Delete',
+                                isDestructive: true,
                               );
 
                               if (confirm == true) {
                                 final db = ref.read(appDatabaseProvider);
+                                await db.syncQueueDao.enqueueDeletion(entity: 'card_transaction', entityId: t.id);
                                 await (db.delete(db.cardTransactionsTable)..where((ct) => ct.id.equals(t.id))).go();
-                                final newBal = (card.previousOutstandingPaise - t.amountPaise).clamp(0, 999999999);
-                                await (db.update(db.creditCardsTable)..where((c) => c.id.equals(card.id)))
-                                    .write(CreditCardsTableCompanion(
-                                  previousOutstandingPaise: Value(newBal),
-                                ));
+                                // Do NOT also adjust creditCardsTable.previousOutstandingPaise here:
+                                // it's the card's fixed opening balance, and every reader (this
+                                // screen, dashboard, more/notifications screens, backend reports)
+                                // derives the live outstanding as previousOutstandingPaise + sum of
+                                // remaining transactions — which already reflects this deletion since
+                                // the row above is gone. Mutating it too double-counted the deleted
+                                // transaction everywhere else that reads this card (data-persistence
+                                // audit fix, 2026-09-17).
                                 ref.read(syncServiceProvider).triggerSync();
+                                if (context.mounted) {
+                                  AppFeedback.showSuccess(context, 'Transaction deleted.');
+                                }
                               }
                             },
                           ),
@@ -680,13 +698,21 @@ class _CardTransactionsSheet extends ConsumerWidget {
           children: [
             TextField(
               controller: descCtrl,
-              decoration: const InputDecoration(labelText: 'Description *'),
+              decoration: const InputDecoration(
+                labelText: 'Description *',
+                hintText: 'e.g. Grocery shopping',
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount (₹) *', prefixText: '₹ '),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
+              decoration: const InputDecoration(
+                labelText: 'Amount (₹) *',
+                hintText: '0.00',
+                prefixText: '₹ ',
+              ),
             ),
           ],
         ),
@@ -696,11 +722,17 @@ class _CardTransactionsSheet extends ConsumerWidget {
             onPressed: () async {
               final desc = descCtrl.text.trim();
               final amt = double.tryParse(amountCtrl.text) ?? 0;
-              if (desc.isEmpty || amt <= 0) return;
+              if (desc.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a description.');
+                return;
+              }
+              if (amt <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
 
               final isPay = t.amountPaise < 0;
               final newPaise = (amt * 100).round() * (isPay ? -1 : 1);
-              final delta = newPaise - t.amountPaise;
 
               final db = ref.read(appDatabaseProvider);
               await (db.update(db.cardTransactionsTable)..where((ct) => ct.id.equals(t.id)))
@@ -708,15 +740,18 @@ class _CardTransactionsSheet extends ConsumerWidget {
                 description: Value(desc),
                 amountPaise: Value(newPaise),
               ));
-
-              final newBal = (card.previousOutstandingPaise + delta).clamp(0, 999999999);
-              await (db.update(db.creditCardsTable)..where((c) => c.id.equals(card.id)))
-                  .write(CreditCardsTableCompanion(
-                previousOutstandingPaise: Value(newBal),
-              ));
+              // Do NOT also adjust creditCardsTable.previousOutstandingPaise here: it's the
+              // card's fixed opening balance, and every reader (this screen, dashboard,
+              // more/notifications screens, backend reports) derives the live outstanding as
+              // previousOutstandingPaise + sum of transactions, which already reflects this
+              // edited amount via the row above. Mutating it too double-counted the delta
+              // everywhere else that reads this card (data-persistence audit fix, 2026-09-17).
               ref.read(syncServiceProvider).triggerSync();
 
-              if (context.mounted) Navigator.pop(context);
+              if (context.mounted) {
+                Navigator.pop(context);
+                AppFeedback.showSuccess(context, 'Transaction updated!');
+              }
             },
             child: const Text('Save'),
           ),

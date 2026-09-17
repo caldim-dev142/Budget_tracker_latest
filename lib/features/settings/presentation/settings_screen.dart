@@ -7,6 +7,7 @@ import 'package:drift/drift.dart' hide Column;
 import '../../../core/utils/csv_exporter/csv_exporter.dart';
 import '../../../core/utils/category_icons.dart';
 import '../../../core/utils/timezone_utils.dart';
+import '../../../core/utils/app_feedback.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../providers/settings_providers.dart';
 import '../../auth/providers/auth_providers.dart';
@@ -197,11 +198,9 @@ class SettingsScreen extends ConsumerWidget {
                     final supported = await svc.canAuthenticate();
                     if (!supported) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('No lock screen configured on this device. Set up a PIN, pattern, or biometric first.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
+                        AppFeedback.showWarning(
+                          context,
+                          'No lock screen configured on this device. Set up a PIN, pattern, or biometric first.',
                         );
                       }
                       return;
@@ -212,11 +211,9 @@ class SettingsScreen extends ConsumerWidget {
                     );
                     if (!ok) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Authentication failed or cancelled.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
+                        AppFeedback.showWarning(
+                          context,
+                          'Authentication failed or cancelled.',
                         );
                       }
                       return;
@@ -225,12 +222,7 @@ class SettingsScreen extends ConsumerWidget {
                     await svc.setEnabled(true);
                     ref.read(appUnlockedProvider.notifier).state = true;
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Lock App enabled.'),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
+                      AppFeedback.showSuccess(context, 'Lock App enabled.');
                     }
                   } else {
                     final ok = await svc.authenticate(
@@ -238,11 +230,9 @@ class SettingsScreen extends ConsumerWidget {
                     );
                     if (!ok) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Authentication failed. Lock App remains enabled.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
+                        AppFeedback.showWarning(
+                          context,
+                          'Authentication failed. Lock App remains enabled.',
                         );
                       }
                       return;
@@ -251,12 +241,7 @@ class SettingsScreen extends ConsumerWidget {
                     await svc.setEnabled(false);
                     ref.read(appUnlockedProvider.notifier).state = true;
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Lock App disabled.'),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
+                      AppFeedback.showInfo(context, 'Lock App disabled.');
                     }
                   }
                 },
@@ -395,23 +380,12 @@ class SettingsScreen extends ConsumerWidget {
               try {
                 await ref.read(authStateNotifierProvider.notifier).deleteAccount();
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Account permanently deleted.'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
+                  AppFeedback.showSuccess(context, 'Account permanently deleted.');
                   context.go('/auth/login');
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to delete account: $e'),
-                      backgroundColor: Colors.red,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
+                  AppFeedback.showError(context, 'Failed to delete account', error: e);
                 }
               }
             },
@@ -444,7 +418,9 @@ class SettingsScreen extends ConsumerWidget {
           builder: (context, ref, child) {
             final db = ref.watch(appDatabaseProvider);
             return FutureBuilder<List<CategoriesTableData>>(
-              future: db.select(db.categoriesTable).get(),
+              future: (db.select(db.categoriesTable)
+                    ..where((c) => c.archivedAt.isNull()))
+                  .get(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -509,26 +485,31 @@ class SettingsScreen extends ConsumerWidget {
                                       IconButton(
                                         icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 20),
                                         onPressed: () async {
-                                          final confirm = await showDialog<bool>(
-                                            context: context,
-                                            builder: (ctx) => AlertDialog(
-                                              title: const Text('Delete Category'),
-                                              content: Text('Delete custom category "${c.name}"?'),
-                                              actions: [
-                                                TextButton(
-                                                    onPressed: () => Navigator.pop(ctx, false),
-                                                    child: const Text('Cancel')),
-                                                FilledButton(
-                                                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                                                  onPressed: () => Navigator.pop(ctx, true),
-                                                  child: const Text('Delete'),
-                                                ),
-                                              ],
-                                            ),
+                                          final confirm = await AppFeedback.showConfirmDialog(
+                                            context,
+                                            title: 'Delete Category',
+                                            message: 'Delete custom category "${c.name}"?',
+                                            confirmLabel: 'Delete',
+                                            isDestructive: true,
                                           );
                                           if (confirm == true) {
-                                            await (db.delete(db.categoriesTable)..where((cat) => cat.id.equals(c.id))).go();
-                                            if (context.mounted) Navigator.pop(context);
+                                            try {
+                                              // Archive locally (matches server behavior: the category is
+                                              // archived, never hard-deleted, so historical entries that
+                                              // still reference it via categoryId keep resolving correctly
+                                              // instead of crashing on a missing category lookup).
+                                              await db.syncQueueDao.enqueueDeletion(entity: 'category', entityId: c.id);
+                                              await db.categoryDao.softArchive(c.id);
+                                              ref.read(syncServiceProvider).triggerSync();
+                                              if (context.mounted) {
+                                                Navigator.pop(context);
+                                                AppFeedback.showSuccess(context, 'Category "${c.name}" deleted.');
+                                              }
+                                            } catch (e) {
+                                              if (context.mounted) {
+                                                AppFeedback.showError(context, 'Failed to delete category', error: e);
+                                              }
+                                            }
                                           }
                                         },
                                       ),
@@ -667,18 +648,31 @@ class SettingsScreen extends ConsumerWidget {
                 onPressed: () async {
                   final name = nameCtrl.text.trim();
                   final group = groupCtrl.text.trim();
-                  if (name.isEmpty) return;
+                  if (name.isEmpty) {
+                    AppFeedback.showWarning(context, 'Please enter a category name.');
+                    return;
+                  }
 
-                  final db = ref.read(appDatabaseProvider);
-                  await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
-                      .write(CategoriesTableCompanion(
-                    name: Value(name),
-                    groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
-                    kind: Value(kind),
-                    needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
-                  ));
+                  try {
+                    final db = ref.read(appDatabaseProvider);
+                    await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
+                        .write(CategoriesTableCompanion(
+                      name: Value(name),
+                      groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
+                      kind: Value(kind),
+                      needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                    ));
+                    ref.read(syncServiceProvider).triggerSync();
 
-                  if (context.mounted) Navigator.pop(context);
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      AppFeedback.showSuccess(context, 'Category updated successfully.');
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      AppFeedback.showError(context, 'Failed to update category', error: e);
+                    }
+                  }
                 },
                 child: const Text('Save'),
               ),
@@ -811,36 +805,43 @@ class SettingsScreen extends ConsumerWidget {
                   onPressed: () async {
                     final name = nameCtrl.text.trim();
                     final group = groupCtrl.text.trim();
-                    if (name.isEmpty) return;
+                    if (name.isEmpty) {
+                      AppFeedback.showWarning(context, 'Please enter a category name.');
+                      return;
+                    }
 
-                    final db = ref.read(appDatabaseProvider);
-                    final auth = ref.read(authStateProvider).valueOrNull;
-                    final householdId = (auth?.householdId != null && auth!.householdId!.isNotEmpty)
-                        ? auth.householdId!
-                        : 'local';
+                    try {
+                      final db = ref.read(appDatabaseProvider);
+                      final auth = ref.read(authStateProvider).valueOrNull;
+                      final householdId = (auth?.householdId != null && auth!.householdId!.isNotEmpty)
+                          ? auth.householdId!
+                          : 'local';
 
-                    await db.categoryDao.upsertAll([
-                      CategoriesTableCompanion.insert(
-                        id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
-                        householdId: householdId,
-                        kind: kind,
-                        groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
-                        name: name,
-                        needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
-                        isDeduction: const Value(false),
-                        isSystem: const Value(false),
-                        sortOrder: const Value(100),
-                      )
-                    ]);
+                      await db.categoryDao.upsertAll([
+                        CategoriesTableCompanion.insert(
+                          id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
+                          householdId: householdId,
+                          kind: kind,
+                          groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
+                          name: name,
+                          needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                          isDeduction: const Value(false),
+                          isSystem: const Value(false),
+                          sortOrder: const Value(100),
+                        )
+                      ]);
 
-                    ref.read(syncServiceProvider).triggerSync();
+                      ref.read(syncServiceProvider).triggerSync();
 
-                    if (context.mounted) {
-                      Navigator.pop(context); // Close add category dialog
-                      Navigator.pop(context); // Close bottom sheet
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Custom category added!')),
-                      );
+                      if (context.mounted) {
+                        Navigator.pop(context); // Close add category dialog
+                        Navigator.pop(context); // Close bottom sheet
+                        AppFeedback.showSuccess(context, 'Custom category "$name" added!');
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        AppFeedback.showError(context, 'Failed to add category', error: e);
+                      }
                     }
                   },
                   child: const Text('Save'),
@@ -855,47 +856,64 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _exportToCsv(BuildContext context, WidgetRef ref) async {
     final db = ref.read(appDatabaseProvider);
-    final entries = await db.select(db.entriesTable).get();
+    // DEF-DATA-05: export only the active household's live (not soft-deleted) entries.
+    final householdId = ref.read(authStateProvider).valueOrNull?.householdId ?? 'local';
+    final entries = await (db.select(db.entriesTable)
+          ..where((e) => e.householdId.equals(householdId) & e.deletedAt.isNull())
+          ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+        .get();
+    final categoryNames = {
+      for (final c in await (db.select(db.categoriesTable)..where((c) => c.householdId.equals(householdId))).get())
+        c.id: c.name,
+    };
 
     if (entries.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No entries found to export.')),
-        );
+        AppFeedback.showInfo(context, 'No entries found to export.');
       }
       return;
     }
 
     final csvBuffer = StringBuffer();
+    // RFC 4180 quoting: fields containing comma, quote or line breaks are wrapped and quotes doubled.
+    String csvField(String? value) {
+      final v = value ?? '';
+      if (v.contains(RegExp(r'[",\r\n]'))) return '"${v.replaceAll('"', '""')}"';
+      return v;
+    }
+
     csvBuffer.writeln('ID,Date,Category,Type,Amount (Paise),Note');
     for (final e in entries) {
-      csvBuffer.writeln('${e.id},${e.entryDate.toIso8601String().split('T').first},${e.categoryId},${e.kind},${e.amountPaise},${e.note ?? ""}');
+      csvBuffer.writeln([
+        csvField(e.id),
+        e.entryDate.toIso8601String().split('T').first,
+        csvField(categoryNames[e.categoryId] ?? e.categoryId),
+        csvField(e.kind),
+        e.amountPaise.toString(),
+        csvField(e.note),
+      ].join(','));
     }
 
     try {
       final resultPath = await exportCsv(csvBuffer.toString());
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Exported: $resultPath'),
-            action: SnackBarAction(
-              label: 'OK',
-              onPressed: () {},
-            ),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Exported to CSV successfully: $resultPath');
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e')),
-        );
+        AppFeedback.showError(context, 'Export failed', error: e);
       }
     }
   }
 
   Future<void> _forceSync(BuildContext context, WidgetRef ref) async {
+    final authState = ref.read(authStateProvider).valueOrNull;
+    if (authState == null || authState.authMode != AuthMode.authenticated) {
+      AppFeedback.showWarning(context, 'You are not signed in. Please sign in or register to sync with cloud.');
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -903,19 +921,19 @@ class SettingsScreen extends ConsumerWidget {
     );
 
     try {
-      final count = await ref.read(syncServiceProvider).syncAllQueue();
+      final count = await ref.read(syncServiceProvider).syncAllQueue(throwOnError: true);
       if (context.mounted) {
         Navigator.pop(context); // Pop loading spinner
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Force sync completed! Synced $count entries.')),
-        );
+        if (count > 0) {
+          AppFeedback.showSuccess(context, 'Force sync completed! Synced $count changes.');
+        } else {
+          AppFeedback.showInfo(context, 'Already up to date. All local data is synced.');
+        }
       }
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sync failed: $e')),
-        );
+        AppFeedback.showError(context, 'Sync failed', error: e);
       }
     }
   }
@@ -943,8 +961,18 @@ class SettingsScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () {
-              ref.read(serverUrlProvider.notifier).state = ctrl.text.trim();
+              final url = ctrl.text.trim();
+              if (url.isEmpty) {
+                AppFeedback.showWarning(context, 'Please enter a server URL.');
+                return;
+              }
+              if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                AppFeedback.showWarning(context, 'Server URL must start with http:// or https://');
+                return;
+              }
+              ref.read(serverUrlProvider.notifier).state = url;
               Navigator.pop(context);
+              AppFeedback.showSuccess(context, 'Server URL updated.');
             },
             child: const Text('Save'),
           ),
@@ -1158,9 +1186,8 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
   }
 
   Future<void> _handleCreateHousehold() async {
-    final nameCtrl = TextEditingController(
-      text: '${widget.ref.read(authStateProvider).valueOrNull?.displayName ?? "My"}\'s Household',
-    );
+    final displayName = widget.ref.read(authStateProvider).valueOrNull?.displayName;
+    final nameCtrl = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1177,9 +1204,12 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
             const SizedBox(height: 16),
             TextField(
               controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Household Name',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: 'Household Name *',
+                hintText: displayName != null && displayName.isNotEmpty
+                    ? "e.g. $displayName's Household"
+                    : 'e.g. My Household',
+                border: const OutlineInputBorder(),
               ),
             ),
           ],
@@ -1198,21 +1228,22 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
     );
 
     if (confirmed == true && mounted) {
+      final name = nameCtrl.text.trim();
+      if (name.isEmpty) {
+        AppFeedback.showWarning(context, 'Please enter a household name.');
+        return;
+      }
       try {
         final newId = await widget.ref
             .read(authStateNotifierProvider.notifier)
-            .createHousehold(nameCtrl.text.trim());
+            .createHousehold(name);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Household created! ID: $newId')),
-          );
+          AppFeedback.showSuccess(context, 'Household created successfully! ID: $newId');
           _loadHousehold();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to create household: $e')),
-          );
+          AppFeedback.showError(context, 'Failed to create household', error: e);
         }
       }
     }
@@ -1237,7 +1268,8 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
             TextField(
               controller: idCtrl,
               decoration: InputDecoration(
-                labelText: 'Household ID',
+                labelText: 'Household ID *',
+                hintText: 'e.g. hh-12345678',
                 border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.paste_rounded),
@@ -1268,9 +1300,7 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
     if (confirmed == true && mounted) {
       final inputId = idCtrl.text.trim();
       if (inputId.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter a valid Household ID.')),
-        );
+        AppFeedback.showWarning(context, 'Please enter a valid Household ID.');
         return;
       }
       try {
@@ -1278,16 +1308,12 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
             .read(authStateNotifierProvider.notifier)
             .joinHousehold(inputId);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Successfully joined household!')),
-          );
+          AppFeedback.showSuccess(context, 'Successfully joined household!');
           _loadHousehold();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))),
-          );
+          AppFeedback.showError(context, 'Failed to join household', error: e);
         }
       }
     }
@@ -1303,7 +1329,8 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
         content: TextField(
           controller: ctrl,
           decoration: const InputDecoration(
-            labelText: 'New Household Name',
+            labelText: 'New Household Name *',
+            hintText: 'e.g. Smith Family',
             border: OutlineInputBorder(),
           ),
         ),
@@ -1322,48 +1349,33 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
 
     if (confirmed == true && mounted) {
       final newName = ctrl.text.trim();
-      if (newName.isEmpty) return;
+      if (newName.isEmpty) {
+        AppFeedback.showWarning(context, 'Please enter a household name.');
+        return;
+      }
       try {
         await widget.ref
             .read(authStateNotifierProvider.notifier)
             .updateHouseholdName(newName);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Household name updated!')),
-          );
+          AppFeedback.showSuccess(context, 'Household name updated!');
           _loadHousehold();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to update name: $e')),
-          );
+          AppFeedback.showError(context, 'Failed to update household name', error: e);
         }
       }
     }
   }
 
   Future<void> _handleDeleteHousehold(String householdName) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Household'),
-        content: Text(
-          'Are you sure you want to delete "$householdName"?\n\nAll member associations and household data will be permanently removed. This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete Household'),
-          ),
-        ],
-      ),
+    final confirmed = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Household',
+      message: 'Are you sure you want to delete "$householdName"?\n\nAll member associations and household data will be permanently removed. This action cannot be undone.',
+      confirmLabel: 'Delete Household',
+      isDestructive: true,
     );
 
     if (confirmed == true && mounted) {
@@ -1372,42 +1384,24 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
             .read(authStateNotifierProvider.notifier)
             .deleteHousehold();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Household deleted successfully.')),
-          );
+          AppFeedback.showSuccess(context, 'Household deleted successfully.');
           Navigator.pop(context);
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete household: $e')),
-          );
+          AppFeedback.showError(context, 'Failed to delete household', error: e);
         }
       }
     }
   }
 
   Future<void> _handleRemoveMember(String memberId, String memberName) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Remove Family Member'),
-        content: Text(
-          'Remove "$memberName" from this household?\n\nThey will lose access to this household without affecting other members.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Remove Family Member',
+      message: 'Remove "$memberName" from this household?\n\nThey will lose access to this household without affecting other members.',
+      confirmLabel: 'Remove',
+      isDestructive: true,
     );
 
     if (confirmed == true && mounted) {
@@ -1416,16 +1410,12 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
             .read(authStateNotifierProvider.notifier)
             .removeHouseholdMember(memberId);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Removed "$memberName" from household.')),
-          );
+          AppFeedback.showSuccess(context, 'Removed "$memberName" from household.');
           _loadHousehold();
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to remove member: $e')),
-          );
+          AppFeedback.showError(context, 'Failed to remove member', error: e);
         }
       }
     }
@@ -1577,9 +1567,7 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
                                           tooltip: 'Copy Household ID',
                                           onPressed: () {
                                             Clipboard.setData(ClipboardData(text: householdId));
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Household ID copied to clipboard!')),
-                                            );
+                                            AppFeedback.showInfo(context, 'Household ID copied to clipboard!');
                                           },
                                         ),
                                       ],

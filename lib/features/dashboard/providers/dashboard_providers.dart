@@ -142,12 +142,10 @@ final dashboardProvider =
     }
 
     int ccOutstandingPaise = 0;
-    int cardBorrowDeltaPaise = 0;
     for (final card in cards) {
       final txns = await (db.select(db.cardTransactionsTable)..where((t) => t.cardId.equals(card.id))).get();
       final delta = txns.fold<int>(0, (s, t) => s + t.amountPaise);
       ccOutstandingPaise += card.previousOutstandingPaise + delta;
-      cardBorrowDeltaPaise += delta;
     }
 
     final receivables = await (db.select(db.receivablesTable)..where((r) => r.householdId.equals(householdId))).get();

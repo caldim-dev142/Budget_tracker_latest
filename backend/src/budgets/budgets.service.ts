@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, ForbiddenException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
 
@@ -18,6 +18,18 @@ export class BudgetsService {
   }
 
   async upsertBulk(householdId: string, yearMonth: string, items: UpdateBudgetDto[]) {
+    // Tenant check: every referenced category must belong to the caller's household.
+    const categoryIds = [...new Set(items.map((i) => i.categoryId))];
+    if (categoryIds.length > 0) {
+      const owned = await this.prisma.category.findMany({
+        where: { id: { in: categoryIds }, householdId },
+        select: { id: true },
+      });
+      if (owned.length !== categoryIds.length) {
+        throw new ForbiddenException('One or more categories do not belong to this household.');
+      }
+    }
+
     const operations = items.map((item) =>
       this.prisma.budget.upsert({
         where: {

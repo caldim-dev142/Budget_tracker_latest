@@ -2,6 +2,7 @@ import { Controller, Get, Body, Patch, Delete, UseGuards, Req } from '@nestjs/co
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -18,8 +19,8 @@ export class UsersController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Update profile display name' })
-  updateDisplayName(@Req() req: any, @Body('displayName') displayName: string) {
-    return this.usersService.updateDisplayName(req.user.userId, displayName);
+  updateDisplayName(@Req() req: any, @Body() body: UpdateUserDto) {
+    return this.usersService.updateDisplayName(req.user.userId, body.displayName.trim());
   }
 
   @Delete('me')

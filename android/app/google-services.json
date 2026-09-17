@@ -7,14 +7,14 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:812371931220:android:39532a408dffd7e9647dc1",
+        "mobilesdk_app_id": "1:812371931220:android:0a689142c20dd13c647dc1",
         "android_client_info": {
           "package_name": "com.caldim.budgettracker"
         }
       },
       "oauth_client": [
         {
-          "client_id": "812371931220-37l14hfs1nmluk88hs44v0bnl8rk6ir6.apps.googleusercontent.com",
+          "client_id": "812371931220-e5ifkj80c2ke297s095po2blif9sqhb0.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.caldim.budgettracker",

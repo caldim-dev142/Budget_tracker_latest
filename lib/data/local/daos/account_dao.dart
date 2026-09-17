@@ -51,7 +51,9 @@ class AccountDao extends DatabaseAccessor<AppDatabase> with _$AccountDaoMixin {
 
     final entries = await (db.select(db.entriesTable)..where((e) => e.accountId.equals(accountId) & e.deletedAt.isNull())).get();
     if (entries.isEmpty) return;
-    final categories = await select(db.categoriesTable).get();
+    final categories = await (db.select(db.categoriesTable)
+          ..where((c) => c.householdId.equals(account.householdId)))
+        .get();
     final categoryMap = {for (var c in categories) c.id: c};
 
     int balance = 0;
@@ -83,9 +85,13 @@ class AccountDao extends DatabaseAccessor<AppDatabase> with _$AccountDaoMixin {
     await updateBalance(accountId, balance);
   }
 
-  /// Automatically recalculates balances for all active accounts
-  Future<void> recalculateAllAccountBalances() async {
-    final accounts = await select(accountsTable).get();
+  /// Automatically recalculates balances for active accounts (scoped to household if provided)
+  Future<void> recalculateAllAccountBalances({String? householdId}) async {
+    final query = select(accountsTable);
+    if (householdId != null && householdId.isNotEmpty) {
+      query.where((a) => a.householdId.equals(householdId));
+    }
+    final accounts = await query.get();
     for (final acc in accounts) {
       await recalculateAccountBalance(acc.id);
     }

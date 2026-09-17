@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/month_switcher.dart';
+import '../../../shared/widgets/skeleton_loader.dart';
 
 import '../../../shared/widgets/money_text.dart';
 import '../../auth/providers/auth_providers.dart';
@@ -34,7 +35,14 @@ class ReportsScreen extends ConsumerWidget {
         children: [
           // Month Summary Overview Banner
           vmAsync.when(
-            loading: () => const SizedBox.shrink(),
+            loading: () => const Padding(
+              padding: EdgeInsets.only(bottom: 16),
+              child: SkeletonLoader(
+                width: double.infinity,
+                height: 120,
+                borderRadius: 24,
+              ),
+            ),
             error: (_, __) => const SizedBox.shrink(),
             data: (vm) => Container(
               margin: const EdgeInsets.only(bottom: 16),

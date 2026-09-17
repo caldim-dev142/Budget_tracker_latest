@@ -14,20 +14,13 @@ import '../../../core/services/sync_service.dart';
 
 /// Production backend URL supplied at compile-time via --dart-define=BACKEND_URL=https://...
 const String kBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
+const String kDefaultServerUrl = 'http://192.168.1.166:3001';
 
 final serverUrlProvider = StateProvider<String>((_) {
   if (kBackendUrl.isNotEmpty) {
     return kBackendUrl;
   }
-  if (kReleaseMode) {
-    // In production release builds, default to empty string so it doesn't leak developer LAN IP
-    return '';
-  }
-  // Default development fallback for Android emulator / local testing (NestJS runs on port 3001)
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://10.0.2.2:3001';
-  }
-  return 'http://localhost:3001';
+  return kDefaultServerUrl;
 });
 final tokenProvider = StateProvider<String?>((_) => null);
 
@@ -106,12 +99,114 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
           }
           return handler.next(options);
         },
+        onError: (error, handler) async {
+          if (error.response?.statusCode == 401 &&
+              !error.requestOptions.path.contains('/auth/login') &&
+              !error.requestOptions.path.contains('/auth/register') &&
+              !error.requestOptions.path.contains('/auth/refresh')) {
+            final refreshed = await _attemptTokenRefresh();
+            if (refreshed) {
+              try {
+                final newAccessToken = await SecureStore.readAccessToken();
+                final opts = error.requestOptions;
+                opts.headers['Authorization'] = 'Bearer $newAccessToken';
+                final retryRes = await _dio.fetch(opts);
+                return handler.resolve(retryRes);
+              } catch (e) {
+                return handler.next(error);
+              }
+            } else {
+              await _handleSessionExpired();
+            }
+          }
+          return handler.next(error);
+        },
       ),
     );
     _restoreSavedSession();
   }
 
+  Dio get dio => _dio;
+
+  bool _isRefreshing = false;
+
+  /// Automatically rotates the JWT access token using the stored refresh token.
+  Future<bool> _attemptTokenRefresh() async {
+    if (_isRefreshing) return false;
+    _isRefreshing = true;
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      final refreshToken = await SecureStore.readRefreshToken();
+      final family = await SecureStore.readRefreshTokenFamily();
+      final userId = await SecureStore.read('auth_user_id');
+
+      if (serverUrl.isEmpty || refreshToken == null || family == null || userId == null) {
+        return false;
+      }
+
+      final refreshDio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+          sendTimeout: const Duration(seconds: 8),
+          contentType: 'application/json',
+        ),
+      );
+
+      final res = await refreshDio.post(
+        '$serverUrl/auth/refresh',
+        data: {
+          'userId': userId,
+          'refreshToken': refreshToken,
+          'family': family,
+        },
+      );
+
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final data = res.data;
+        if (data is Map) {
+          final newAccessToken = data['accessToken'] as String?;
+          final newRefreshToken = data['refreshToken'] as String?;
+          final newFamily = (data['refreshTokenFamily'] ?? data['family']) as String?;
+
+          if (newAccessToken != null && newAccessToken.isNotEmpty) {
+            await SecureStore.writeAccessToken(newAccessToken);
+            _ref.read(tokenProvider.notifier).state = newAccessToken;
+            if (newRefreshToken != null) {
+              await SecureStore.writeRefreshToken(newRefreshToken);
+            }
+            if (newFamily != null) {
+              await SecureStore.writeRefreshTokenFamily(newFamily);
+            }
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Token refresh failed: $e');
+      return false;
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  Future<void> _handleSessionExpired() async {
+    final currentAuth = state.valueOrNull;
+    if (currentAuth != null && currentAuth.isAuthenticated) {
+      debugPrint('Session expired — logging out user cleanly.');
+      await logout();
+    }
+  }
+
   Future<void> _restoreSavedSession() async {
+    try {
+      final savedUrl = await SecureStore.read('server_backend_url');
+      if (savedUrl != null && savedUrl.trim().isNotEmpty) {
+        _ref.read(serverUrlProvider.notifier).state = savedUrl.trim();
+      }
+    } catch (_) {}
+
     try {
       final token = await SecureStore.readAccessToken();
       if (token != null && token.isNotEmpty) {
@@ -147,7 +242,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
             hasCompletedOnboarding: hasCompletedOnboarding,
           ));
           Future.microtask(() async {
-            await _ref.read(syncServiceProvider).pullFromServer();
             await _ref.read(syncServiceProvider).syncAllQueue();
           });
           return;
@@ -157,6 +251,59 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
 
     // No valid session stored -> default to unauthenticated state
     state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
+  }
+
+  /// Updates and persists the backend server URL across app restarts.
+  Future<void> updateServerUrl(String newUrl) async {
+    final cleanUrl = newUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    if (cleanUrl.isNotEmpty) {
+      await SecureStore.write('server_backend_url', cleanUrl);
+      _ref.read(serverUrlProvider.notifier).state = cleanUrl;
+    }
+  }
+
+  /// Tests connectivity to the backend server and its health status.
+  Future<({bool success, String message})> testServerConnection([String? testUrl]) async {
+    final targetUrl = (testUrl != null && testUrl.trim().isNotEmpty)
+        ? testUrl.trim().replaceAll(RegExp(r'/+$'), '')
+        : _ref.read(serverUrlProvider);
+
+    if (targetUrl.isEmpty) {
+      return (success: false, message: 'Server URL is not configured.');
+    }
+
+    try {
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 4),
+          receiveTimeout: const Duration(seconds: 4),
+        ),
+      );
+      final res = await dio.get('$targetUrl/auth/health');
+      if (res.statusCode == 200 && res.data != null) {
+        return (
+          success: true,
+          message: 'Connected to backend server (${res.data['service'] ?? 'OK'})'
+        );
+      }
+      return (success: false, message: 'Server returned HTTP ${res.statusCode}');
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return (
+          success: false,
+          message: 'Connection timed out. Check if server and device are on same network.'
+        );
+      } else if (e.type == DioExceptionType.connectionError) {
+        return (
+          success: false,
+          message: 'Connection refused. Check if the server is running on port 3001.'
+        );
+      }
+      return (success: false, message: e.message ?? 'Failed to connect to server.');
+    } catch (e) {
+      return (success: false, message: e.toString().replaceAll('Exception: ', ''));
+    }
   }
 
   final _googleSignIn = GoogleSignIn(
@@ -210,6 +357,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       if (refreshToken != null) {
         await SecureStore.writeRefreshToken(refreshToken);
       }
+      final googleFamily = data['refreshTokenFamily'] ?? data['family'];
+      if (googleFamily != null) {
+        await SecureStore.writeRefreshTokenFamily(googleFamily.toString());
+      }
 
       await SecureStore.write('auth_email', uEmail);
       await SecureStore.write('auth_name', uName);
@@ -249,7 +400,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
         hasCompletedOnboarding: false,
       ));
       Future.microtask(() async {
-        await _ref.read(syncServiceProvider).pullFromServer();
         await _ref.read(syncServiceProvider).syncAllQueue();
       });
     } on DioException catch (e, st) {
@@ -394,6 +544,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
             if (refreshToken != null) {
               await SecureStore.writeRefreshToken(refreshToken);
             }
+            final loginFamily = data['refreshTokenFamily'] ?? data['family'];
+            if (loginFamily != null) {
+              await SecureStore.writeRefreshTokenFamily(loginFamily.toString());
+            }
             await SecureStore.write('auth_email', userEmail);
             await SecureStore.write('auth_name', displayName);
             await SecureStore.write('auth_user_id', userId);
@@ -430,15 +584,16 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
             ));
 
             Future.microtask(() async {
-              await _ref.read(syncServiceProvider).pullFromServer();
               await _ref.read(syncServiceProvider).syncAllQueue();
             });
             return;
           }
         } on DioException catch (e) {
-          if (e.response?.statusCode == 401 || e.response?.statusCode == 400) {
+          if (e.response?.statusCode == 401 || e.response?.statusCode == 400 || e.response?.statusCode == 403) {
             state = AsyncValue.error(
-              'Invalid email or password. Please check your credentials.',
+              e.response?.statusCode == 403
+                  ? 'Access denied. Please check your account permissions.'
+                  : 'Invalid email or password. Please check your credentials.',
               StackTrace.current,
             );
             return;
@@ -474,6 +629,13 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       }
 
       final user = existingUsers.first;
+      if (user.authProvider != 'email' || user.password == null) {
+        state = AsyncValue.error(
+          'This account cannot be verified offline. Please connect to the internet to sign in.',
+          StackTrace.current,
+        );
+        return;
+      }
       bool valid = false;
       if (user.password != null && user.authProvider == 'email') {
         if (PasswordHasher.isHashed(user.password)) {
@@ -485,9 +647,9 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
           await (db.update(db.usersTable)..where((u) => u.id.equals(user.id)))
               .write(UsersTableCompanion(password: Value(newHash)));
         }
-      } else {
-        valid = true;
       }
+      // DEF-AUTH-03: accounts without a locally verifiable email password (e.g. Google sign-in)
+      // cannot be unlocked offline with an arbitrary password. `valid` stays false for them.
 
       if (!valid) {
         state = AsyncValue.error(
@@ -572,6 +734,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       if (refreshToken != null) {
         await SecureStore.writeRefreshToken(refreshToken);
       }
+      final regFamily = data['refreshTokenFamily'] ?? data['family'];
+      if (regFamily != null) {
+        await SecureStore.writeRefreshTokenFamily(regFamily.toString());
+      }
       await SecureStore.write('auth_email', retEmail);
       await SecureStore.write('auth_name', retName);
       await SecureStore.write('auth_user_id', userId);
@@ -609,7 +775,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       ));
 
       Future.microtask(() async {
-        await _ref.read(syncServiceProvider).pullFromServer();
         await _ref.read(syncServiceProvider).syncAllQueue();
       });
     } on DioException catch (e, st) {
@@ -671,6 +836,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       if (tokens != null && tokens['accessToken'] != null) {
         await SecureStore.writeAccessToken(tokens['accessToken']);
         _ref.read(tokenProvider.notifier).state = tokens['accessToken'];
+        final fam = tokens['refreshTokenFamily'] ?? tokens['family'];
+        if (fam != null) {
+          await SecureStore.writeRefreshTokenFamily(fam.toString());
+        }
       }
       await SecureStore.write('auth_household_id', newHouseholdId);
 
@@ -690,7 +859,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       }
 
       Future.microtask(() async {
-        await _ref.read(syncServiceProvider).pullFromServer();
         await _ref.read(syncServiceProvider).syncAllQueue();
       });
 
@@ -724,6 +892,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       if (tokens != null && tokens['accessToken'] != null) {
         await SecureStore.writeAccessToken(tokens['accessToken']);
         _ref.read(tokenProvider.notifier).state = tokens['accessToken'];
+        final fam = tokens['refreshTokenFamily'] ?? tokens['family'];
+        if (fam != null) {
+          await SecureStore.writeRefreshTokenFamily(fam.toString());
+        }
       }
       await SecureStore.write('auth_household_id', trimmedId);
 
@@ -743,7 +915,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       }
 
       Future.microtask(() async {
-        await _ref.read(syncServiceProvider).pullFromServer();
         await _ref.read(syncServiceProvider).syncAllQueue();
       });
     } catch (e) {
@@ -827,11 +998,13 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
   Future<void> logout() async {
     try {
       final serverUrl = _ref.read(serverUrlProvider);
-      final refreshToken = await SecureStore.readRefreshToken();
-      if (refreshToken != null && refreshToken.isNotEmpty) {
+      // The server revokes refresh tokens by session family (DEF-AUTH-02).
+      // Sending the raw refresh token here matched nothing, so sessions stayed valid after logout.
+      final family = await SecureStore.readRefreshTokenFamily();
+      if (family != null && family.isNotEmpty) {
         await _dio.post(
           '$serverUrl/auth/logout',
-          data: {'family': refreshToken},
+          data: {'family': family},
         );
       }
     } catch (_) {}
@@ -898,7 +1071,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
 
     try {
       if (await _googleSignIn.isSignedIn()) {
-        await _googleSignIn.disconnect().catchError((_) {});
+        await _googleSignIn.disconnect().catchError((_) => null);
         await _googleSignIn.signOut();
       }
     } catch (_) {}
@@ -926,3 +1099,7 @@ final authStateNotifierProvider =
 );
 
 final authStateProvider = authStateNotifierProvider;
+
+final authenticatedDioProvider = Provider<Dio>((ref) {
+  return ref.watch(authStateNotifierProvider.notifier).dio;
+});

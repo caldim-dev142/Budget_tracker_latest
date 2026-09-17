@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../providers/auth_providers.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../core/constants/legal_constants.dart';
+import '../../../core/utils/app_feedback.dart';
 
 /// S2 — Login / Register Screen (doc 09 S2).
 class LoginScreen extends ConsumerStatefulWidget {
@@ -57,22 +58,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final authState = ref.read(authStateNotifierProvider);
     if (mounted) {
       if (authState.hasError) {
-        final errText = authState.error.toString().replaceAll('Exception: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errText),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+        AppFeedback.showError(
+          context,
+          _isRegister ? 'Registration failed' : 'Sign in failed',
+          error: authState.error,
         );
       } else if (authState.valueOrNull?.isAuthenticated == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_isRegister ? 'Account created successfully!' : 'Welcome back!'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+        AppFeedback.showSuccess(
+          context,
+          _isRegister ? 'Account created successfully!' : 'Welcome back!',
         );
         context.go('/dashboard');
       }
@@ -80,33 +74,185 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _handleGoogleSignIn() async {
-    await ref
-        .read(authStateNotifierProvider.notifier)
-        .signInWithGoogleOAuth();
+    setState(() => _isGoogleLoading = true);
+    try {
+      await ref
+          .read(authStateNotifierProvider.notifier)
+          .signInWithGoogleOAuth();
+    } finally {
+      if (mounted) {
+        setState(() => _isGoogleLoading = false);
+      }
+    }
 
     if (mounted) {
       final authState = ref.read(authStateNotifierProvider);
       if (authState.hasError) {
-        final errText = authState.error.toString().replaceAll('Exception: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errText),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+        AppFeedback.showError(
+          context,
+          'Google Sign-In failed',
+          error: authState.error,
         );
       } else if (authState.valueOrNull?.isAuthenticated == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Google Sign-In successful!'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Google Sign-In successful!');
         context.go('/dashboard');
       }
     }
+  }
+
+  void _showServerSettingsDialog(BuildContext context) {
+    final currentUrl = ref.read(serverUrlProvider);
+    final ctrl = TextEditingController(text: currentUrl);
+    String? testResult;
+    bool isTesting = false;
+    bool? isSuccess;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final cs = Theme.of(context).colorScheme;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Icon(Icons.dns_rounded, color: cs.primary),
+                const SizedBox(width: 10),
+                const Text('Backend Server URL', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Configure the IP / URL of the backend PostgreSQL service.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: ctrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: 'e.g. http://192.168.1.166:3001',
+                      prefixIcon: Icon(Icons.link_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.wifi, size: 14),
+                        label: const Text('PC LAN: 192.168.1.166:3001', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          ctrl.text = 'http://192.168.1.166:3001';
+                          setDialogState(() {});
+                        },
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.phone_android, size: 14),
+                        label: const Text('Emulator: 10.0.2.2:3001', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          ctrl.text = 'http://10.0.2.2:3001';
+                          setDialogState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                  if (isTesting) ...[
+                    const SizedBox(height: 14),
+                    const Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  ] else if (testResult != null) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: (isSuccess == true ? Colors.green : cs.error).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: (isSuccess == true ? Colors.green : cs.error).withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isSuccess == true ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                            color: isSuccess == true ? Colors.green.shade800 : cs.error,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              testResult!,
+                              style: TextStyle(
+                                color: isSuccess == true ? Colors.green.shade800 : cs.error,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isTesting
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          isTesting = true;
+                          testResult = null;
+                        });
+                        final res = await ref
+                            .read(authStateNotifierProvider.notifier)
+                            .testServerConnection(ctrl.text.trim());
+                        setDialogState(() {
+                          isTesting = false;
+                          isSuccess = res.success;
+                          testResult = res.message;
+                        });
+                      },
+                child: const Text('Test Connection'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final url = ctrl.text.trim();
+                  if (url.isEmpty) {
+                    AppFeedback.showWarning(ctx, 'Please enter a server URL.');
+                    return;
+                  }
+                  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                    AppFeedback.showWarning(ctx, 'Server URL must start with http:// or https://');
+                    return;
+                  }
+                  await ref
+                      .read(authStateNotifierProvider.notifier)
+                      .updateServerUrl(url);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (context.mounted) {
+                    AppFeedback.showSuccess(context, 'Server URL set to $url');
+                  }
+                },
+                child: const Text('Save & Apply'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -116,6 +262,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.dns_rounded, color: cs.primary),
+            tooltip: 'Backend Server Connection',
+            onPressed: () => _showServerSettingsDialog(context),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -218,7 +375,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         controller: _displayNameCtrl,
                         decoration: const InputDecoration(
                           labelText: 'Your Display Name',
-                          hintText: 'John Doe',
+                          hintText: 'e.g. John Doe',
                           prefixIcon: Icon(Icons.person_outlined),
                         ),
                         textInputAction: TextInputAction.next,
@@ -230,7 +387,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         controller: _householdCtrl,
                         decoration: const InputDecoration(
                           labelText: 'Household Name',
-                          hintText: 'Smith Household',
+                          hintText: 'e.g. Smith Household',
                           prefixIcon: Icon(Icons.home_outlined),
                         ),
                         textInputAction: TextInputAction.done,

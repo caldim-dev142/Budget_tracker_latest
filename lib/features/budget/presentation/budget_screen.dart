@@ -9,6 +9,8 @@ import '../../../shared/widgets/budget_bar.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../core/utils/money.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../core/utils/month.dart';
 import '../../../core/utils/category_icons.dart';
 import '../../../core/services/sync_service.dart';
@@ -214,7 +216,10 @@ class BudgetScreen extends ConsumerWidget {
                   onPressed: () async {
                     final name = nameCtrl.text.trim();
                     final group = groupCtrl.text.trim();
-                    if (name.isEmpty) return;
+                    if (name.isEmpty) {
+                      AppFeedback.showWarning(context, 'Please enter a category name.');
+                      return;
+                    }
 
                     final db = ref.read(appDatabaseProvider);
                     final auth = ref.read(authStateProvider).valueOrNull;
@@ -238,13 +243,7 @@ class BudgetScreen extends ConsumerWidget {
 
                     if (context.mounted) {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Category "$name" added successfully!'),
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      );
+                      AppFeedback.showSuccess(context, 'Category "$name" added successfully!');
                     }
                   },
                   child: const Text('Save'),
@@ -276,13 +275,13 @@ class _BudgetPlannerTab extends ConsumerWidget {
         padding: EdgeInsets.all(16),
         child: SkeletonLoader(width: double.infinity, height: 90, borderRadius: 18),
       ),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
       data: (cats) => budgetsAsync.when(
         loading: () => const Padding(
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 90, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
         data: (budgets) {
           final filteredCats = kindFilter == 'all'
               ? cats
@@ -671,13 +670,23 @@ class _BudgetGroupCard extends ConsumerWidget {
         title: Text('Rename Group "$oldGroupName"'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(labelText: 'New Group Name *'),
+          decoration: const InputDecoration(
+            labelText: 'New Group Name *',
+            hintText: 'e.g. Food & Dining',
+          ),
           autofocus: true,
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            onPressed: () {
+              final val = controller.text.trim();
+              if (val.isEmpty) {
+                AppFeedback.showWarning(ctx, 'Please enter a group name.');
+                return;
+              }
+              Navigator.pop(ctx, val);
+            },
             child: const Text('Save'),
           ),
         ],
@@ -690,14 +699,9 @@ class _BudgetGroupCard extends ConsumerWidget {
         await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
             .write(CategoriesTableCompanion(groupCode: Value(newName)));
       }
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Group renamed to "$newName".'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Group renamed to "$newName".');
       }
     }
   }
@@ -747,13 +751,7 @@ class _BudgetGroupCard extends ConsumerWidget {
       }
       ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Group "$groupName" and all sub-categories deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Group "$groupName" and all sub-categories deleted.');
       }
     } else if (action == 'ungroup') {
       final db = ref.read(appDatabaseProvider);
@@ -761,14 +759,9 @@ class _BudgetGroupCard extends ConsumerWidget {
         await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
             .write(const CategoriesTableCompanion(groupCode: Value.absent()));
       }
+      ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Group "$groupName" removed. Sub-categories kept.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Group "$groupName" removed. Sub-categories kept.');
       }
     }
   }
@@ -792,8 +785,10 @@ class _BudgetGroupCard extends ConsumerWidget {
         content: TextField(
           controller: amountCtrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [AppInputFormatters.positiveDecimal()],
           decoration: const InputDecoration(
             labelText: 'Monthly Budget (₹)',
+            hintText: '0.00',
             prefixText: '₹ ',
           ),
           autofocus: true,
@@ -803,14 +798,35 @@ class _BudgetGroupCard extends ConsumerWidget {
             TextButton(
               style: TextButton.styleFrom(foregroundColor: Colors.red),
               onPressed: () async {
-                final db = ref.read(appDatabaseProvider);
-                await (db.delete(db.budgetsTable)
-                      ..where((b) =>
-                          b.categoryId.equals(cat.id) &
-                          b.yearMonth.equals(ym.toString())))
-                    .go();
-                if (context.mounted) Navigator.pop(context);
-                Future.microtask(() => ref.read(syncServiceProvider).syncAllQueue());
+                try {
+                  final db = ref.read(appDatabaseProvider);
+                  final auth = ref.read(authStateProvider).valueOrNull;
+                  final householdId = auth?.householdId ?? 'local';
+                  final removed = await (db.select(db.budgetsTable)
+                        ..where((b) =>
+                            b.categoryId.equals(cat.id) &
+                            b.yearMonth.equals(ym.toString()) &
+                            b.householdId.equals(householdId)))
+                      .get();
+                  for (final r in removed) {
+                    await db.syncQueueDao.enqueueDeletion(entity: 'budget', entityId: r.id);
+                  }
+                  await (db.delete(db.budgetsTable)
+                        ..where((b) =>
+                            b.categoryId.equals(cat.id) &
+                            b.yearMonth.equals(ym.toString()) &
+                            b.householdId.equals(householdId)))
+                      .go();
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    AppFeedback.showSuccess(context, 'Budget for ${cat.name} cleared.');
+                  }
+                  Future.microtask(() => ref.read(syncServiceProvider).syncAllQueue());
+                } catch (e) {
+                  if (context.mounted) {
+                    AppFeedback.showError(context, 'Failed to clear budget', error: e);
+                  }
+                }
               },
               child: const Text('Clear Budget'),
             ),
@@ -821,44 +837,49 @@ class _BudgetGroupCard extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              final amountPaise = (amount * 100).round();
-              final db = ref.read(appDatabaseProvider);
-              final auth = ref.read(authStateProvider).valueOrNull;
-              final householdId = auth?.householdId ?? 'local';
-
-              final existing = await (db.select(db.budgetsTable)
-                    ..where((b) =>
-                        b.categoryId.equals(cat.id) &
-                        b.yearMonth.equals(ym.toString())))
-                  .getSingleOrNull();
-
-              if (existing != null) {
-                await (db.update(db.budgetsTable)
-                      ..where((b) => b.id.equals(existing.id)))
-                    .write(BudgetsTableCompanion(amountPaise: Value(amountPaise)));
-              } else {
-                await db.into(db.budgetsTable).insert(
-                  BudgetsTableCompanion.insert(
-                    id: _uuid.v4(),
-                    householdId: householdId,
-                    categoryId: cat.id,
-                    yearMonth: ym.toString(),
-                    amountPaise: Value(amountPaise),
-                  ),
-                );
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter a budget amount greater than zero, or tap Clear Budget.');
+                return;
               }
+              try {
+                final amountPaise = (amount * 100).round();
+                final db = ref.read(appDatabaseProvider);
+                final auth = ref.read(authStateProvider).valueOrNull;
+                final householdId = auth?.householdId ?? 'local';
 
-              Future.microtask(() => ref.read(syncServiceProvider).syncAllQueue());
+                final existing = await (db.select(db.budgetsTable)
+                      ..where((b) =>
+                          b.categoryId.equals(cat.id) &
+                          b.yearMonth.equals(ym.toString()) &
+                          b.householdId.equals(householdId)))
+                    .getSingleOrNull();
 
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Budget for ${cat.name} set to ₹$amount!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                if (existing != null) {
+                  await (db.update(db.budgetsTable)
+                        ..where((b) => b.id.equals(existing.id)))
+                    .write(BudgetsTableCompanion(amountPaise: Value(amountPaise)));
+                } else {
+                  await db.into(db.budgetsTable).insert(
+                    BudgetsTableCompanion.insert(
+                      id: _uuid.v4(),
+                      householdId: householdId,
+                      categoryId: cat.id,
+                      yearMonth: ym.toString(),
+                      amountPaise: Value(amountPaise),
+                    ),
+                  );
+                }
+
+                Future.microtask(() => ref.read(syncServiceProvider).syncAllQueue());
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  AppFeedback.showSuccess(context, 'Budget for ${cat.name} updated!');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  AppFeedback.showError(context, 'Failed to save budget', error: e);
+                }
               }
             },
             child: const Text('Save'),
@@ -886,12 +907,18 @@ class _BudgetGroupCard extends ConsumerWidget {
               children: [
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Category Name *'),
+                  decoration: const InputDecoration(
+                    labelText: 'Category Name *',
+                    hintText: 'e.g. Groceries',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: groupCtrl,
-                  decoration: const InputDecoration(labelText: 'Group / Subcategory'),
+                  decoration: const InputDecoration(
+                    labelText: 'Group / Subcategory',
+                    hintText: 'e.g. Food & Dining',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -934,7 +961,10 @@ class _BudgetGroupCard extends ConsumerWidget {
               onPressed: () async {
                 final name = nameCtrl.text.trim();
                 final group = groupCtrl.text.trim();
-                if (name.isEmpty) return;
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a category name.');
+                  return;
+                }
 
                 final db = ref.read(appDatabaseProvider);
                 await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
@@ -945,15 +975,11 @@ class _BudgetGroupCard extends ConsumerWidget {
                   needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
                 ));
 
+                ref.read(syncServiceProvider).triggerSync();
+
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Category "$name" updated!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  AppFeedback.showSuccess(context, 'Category "$name" updated!');
                 }
               },
               child: const Text('Save'),
@@ -965,21 +991,12 @@ class _BudgetGroupCard extends ConsumerWidget {
   }
 
   Future<void> _deleteCategory(BuildContext context, WidgetRef ref, CategoriesTableData cat) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Category?'),
-        content: Text('Are you sure you want to delete category "${cat.name}"?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Category?',
+      message: 'Are you sure you want to delete category "${cat.name}"?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirm == true) {
@@ -987,13 +1004,7 @@ class _BudgetGroupCard extends ConsumerWidget {
       await db.categoryDao.softArchive(cat.id);
       ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Category "${cat.name}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Category "${cat.name}" deleted.');
       }
     }
   }
@@ -1017,19 +1028,19 @@ class _BudgetVsActualTab extends ConsumerWidget {
         padding: EdgeInsets.all(16),
         child: SkeletonLoader(width: double.infinity, height: 90, borderRadius: 18),
       ),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
       data: (cats) => budgetsAsync.when(
         loading: () => const Padding(
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 90, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
         data: (budgets) => entriesAsync.when(
           loading: () => const Padding(
             padding: EdgeInsets.all(16),
             child: SkeletonLoader(width: double.infinity, height: 90, borderRadius: 18),
           ),
-          error: (e, _) => Center(child: Text('Error: $e')),
+          error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
           data: (entries) {
             final idToKey = <String, String>{};
             final groupedCats = <String, CategoriesTableData>{};
@@ -1266,9 +1277,22 @@ class _BudgetVsActualTab extends ConsumerWidget {
                                 constraints: const BoxConstraints(),
                                 icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
                                 onPressed: () async {
-                                  final db = ref.read(appDatabaseProvider);
-                                  await (db.delete(db.entriesTable)..where((e) => e.id.equals(entry.id))).go();
-                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  final confirm = await AppFeedback.showConfirmDialog(
+                                    ctx,
+                                    title: 'Delete Expense',
+                                    message: 'Are you sure you want to delete this entry?',
+                                    confirmLabel: 'Delete',
+                                    isDestructive: true,
+                                  );
+                                  if (confirm == true) {
+                                    final db = ref.read(appDatabaseProvider);
+                                    await db.entryDao.softDelete(entry.id);
+                                    ref.read(syncServiceProvider).triggerSync();
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    if (context.mounted) {
+                                      AppFeedback.showSuccess(context, 'Expense entry deleted.');
+                                    }
+                                  }
                                 },
                               ),
                             ],
@@ -1303,8 +1327,10 @@ class _BudgetVsActualTab extends ConsumerWidget {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
               autofocus: true,
@@ -1327,40 +1353,48 @@ class _BudgetVsActualTab extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              if (amount <= 0) return;
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
 
-              final db = ref.read(appDatabaseProvider);
-              final auth = ref.read(authStateProvider).valueOrNull;
-              final householdId = auth?.householdId ?? 'local';
-              final userId = auth?.userId ?? 'user-local';
+              try {
+                final db = ref.read(appDatabaseProvider);
+                final auth = ref.read(authStateProvider).valueOrNull;
+                final householdId = auth?.householdId ?? 'local';
+                final userId = auth?.userId ?? 'user-local';
 
-              final now = DateTime.now();
-              final entryDate = DateTime(ym.year, ym.month, now.day > 28 ? 28 : now.day);
+                final now = DateTime.now();
+                final daysInMonth = DateTime(ym.year, ym.month + 1, 0).day;
+                final safeDay = (ym.year == now.year && ym.month == now.month)
+                    ? now.day
+                    : now.day.clamp(1, daysInMonth);
+                final entryDate = DateTime(ym.year, ym.month, safeDay);
 
-              await db.into(db.entriesTable).insert(
-                EntriesTableCompanion.insert(
-                  id: _uuid.v4(),
-                  householdId: householdId,
-                  categoryId: cat.id,
-                  kind: 'spending',
-                  entryDate: entryDate,
-                  amountPaise: (amount * 100).round(),
-                  note: Value(noteCtrl.text.trim().isNotEmpty ? noteCtrl.text.trim() : null),
-                  createdBy: userId,
-                  createdAt: now,
-                  updatedAt: now,
-                ),
-              );
-
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Expense entry of ₹$amount added under ${cat.name}!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                await db.into(db.entriesTable).insert(
+                  EntriesTableCompanion.insert(
+                    id: _uuid.v4(),
+                    householdId: householdId,
+                    categoryId: cat.id,
+                    kind: 'spending',
+                    entryDate: entryDate,
+                    amountPaise: (amount * 100).round(),
+                    note: Value(noteCtrl.text.trim().isNotEmpty ? noteCtrl.text.trim() : null),
+                    createdBy: userId,
+                    createdAt: now,
+                    updatedAt: now,
                   ),
                 );
+                ref.read(syncServiceProvider).triggerSync();
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  AppFeedback.showSuccess(context, 'Expense entry of ₹${amount.toStringAsFixed(2)} added under ${cat.name}!');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  AppFeedback.showError(context, 'Failed to add entry', error: e);
+                }
               }
             },
             child: const Text('Save Entry'),

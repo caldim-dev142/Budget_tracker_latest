@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:drift/drift.dart' hide Column;
 
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../core/utils/money.dart';
 import '../../../data/local/database.dart';
 import '../../../core/services/sync_service.dart';
@@ -45,7 +46,6 @@ class _BorrowLendingScreenState extends ConsumerState<BorrowLendingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final summaryAsync = ref.watch(borrowLendSummaryProvider);
 
     return Scaffold(
@@ -128,8 +128,6 @@ class _SummaryHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
     return summaryAsync.when(
       loading: () => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -244,7 +242,16 @@ class _LentOutTab extends ConsumerWidget {
 
     return itemsAsync.when(
       loading: () => const _ListSkeleton(),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            AppFeedback.formatError(e),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: cs.error),
+          ),
+        ),
+      ),
       data: (items) {
         if (items.isEmpty) {
           return _EmptyState(
@@ -275,11 +282,21 @@ class _BorrowedTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
     final itemsAsync = ref.watch(unpaidBillsProvider);
 
     return itemsAsync.when(
       loading: () => const _ListSkeleton(),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            AppFeedback.formatError(e),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: cs.error),
+          ),
+        ),
+      ),
       data: (items) {
         if (items.isEmpty) {
           return _EmptyState(
@@ -310,21 +327,21 @@ class _HistoryTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settledAsync = ref.watch(settledReceivablesProvider);
-    final paidAsync = ref.watch(paidBillsProvider);
+    final receivablesAsync = ref.watch(receivablesStreamProvider);
+    final billsAsync = ref.watch(plannedBillsStreamProvider);
 
-    final settled = settledAsync.valueOrNull ?? [];
-    final paid = paidAsync.valueOrNull ?? [];
+    final receivables = receivablesAsync.valueOrNull ?? [];
+    final bills = billsAsync.valueOrNull ?? [];
 
-    if (settledAsync.isLoading || paidAsync.isLoading) {
+    if (receivablesAsync.isLoading || billsAsync.isLoading) {
       return const _ListSkeleton();
     }
 
-    if (settled.isEmpty && paid.isEmpty) {
+    if (receivables.isEmpty && bills.isEmpty) {
       return _EmptyState(
         icon: Icons.history_rounded,
         title: 'No History Yet',
-        subtitle: 'Settled loans and paid bills will appear here.',
+        subtitle: 'Borrow and lending records will appear here.',
         color: const Color(0xFF78909C),
       );
     }
@@ -332,22 +349,26 @@ class _HistoryTab extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
       children: [
-        if (settled.isNotEmpty) ...[
+        if (receivables.isNotEmpty) ...[
           _SectionHeader(
-            label: 'Returned to You',
-            icon: Icons.check_circle_rounded,
+            label: 'Money Lent (${receivables.length})',
+            icon: Icons.call_made_rounded,
             color: const Color(0xFF00897B),
           ),
-          ...settled.map((r) => _HistoryReceivableTile(item: r)),
+          ...receivables.map(
+            (r) => _HistoryReceivableTile(item: r, householdId: householdId),
+          ),
           const SizedBox(height: 12),
         ],
-        if (paid.isNotEmpty) ...[
+        if (bills.isNotEmpty) ...[
           _SectionHeader(
-            label: 'Bills Paid',
-            icon: Icons.check_circle_rounded,
-            color: const Color(0xFF5C6BC0),
+            label: 'Money Borrowed (${bills.length})',
+            icon: Icons.call_received_rounded,
+            color: const Color(0xFFEF4444),
           ),
-          ...paid.map((b) => _HistoryBillTile(item: b)),
+          ...bills.map(
+            (b) => _HistoryBillTile(item: b, householdId: householdId),
+          ),
         ],
       ],
     );
@@ -389,16 +410,16 @@ class _ReceivableCard extends ConsumerWidget {
         ),
         confirmDismiss: (_) => _confirmSettle(context, isReturn: true),
         onDismissed: (_) async {
-          await ref.read(appDatabaseProvider).borrowLendDao.settleReceivable(item.id);
-          ref.read(syncServiceProvider).triggerSync();
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${item.personName} marked as returned'),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            );
+          try {
+            await ref.read(appDatabaseProvider).borrowLendDao.settleReceivable(item.id);
+            ref.read(syncServiceProvider).triggerSync();
+            if (context.mounted) {
+              AppFeedback.showSuccess(context, '${item.personName} marked as returned');
+            }
+          } catch (e) {
+            if (context.mounted) {
+              AppFeedback.showError(context, 'Failed to settle receivable', error: e);
+            }
           }
         },
         child: PressableScale(
@@ -482,23 +503,13 @@ class _ReceivableCard extends ConsumerWidget {
   }
 
   Future<bool?> _confirmSettle(BuildContext context,
-      {required bool isReturn}) async {
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Mark as Returned?'),
-        content: Text(
-            'Mark ₹${(item.amountPaise / 100).toStringAsFixed(0)} from ${item.personName} as returned?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Confirm')),
-        ],
-      ),
+      {required bool isReturn}) {
+    return AppFeedback.showConfirmDialog(
+      context,
+      title: 'Mark as Returned?',
+      message: 'Mark ₹${(item.amountPaise / 100).toStringAsFixed(0)} from ${item.personName} as returned?',
+      confirmLabel: 'Confirm',
+      isDestructive: false,
     );
   }
 
@@ -548,34 +559,24 @@ class _PlannedBillCard extends ConsumerWidget {
             ],
           ),
         ),
-        confirmDismiss: (_) => showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('Mark as Paid?'),
-            content: Text(
-                'Mark ₹${(item.amountPaise / 100).toStringAsFixed(0)} for "${item.name}" as paid?'),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel')),
-              FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Confirm')),
-            ],
-          ),
+        confirmDismiss: (_) => AppFeedback.showConfirmDialog(
+          context,
+          title: 'Mark as Paid?',
+          message: 'Mark ₹${(item.amountPaise / 100).toStringAsFixed(0)} for "${item.name}" as paid?',
+          confirmLabel: 'Confirm',
+          isDestructive: false,
         ),
         onDismissed: (_) async {
-          await ref.read(appDatabaseProvider).borrowLendDao.settlePlannedBill(item.id);
-          ref.read(syncServiceProvider).triggerSync();
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('"${item.name}" marked as paid'),
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            );
+          try {
+            await ref.read(appDatabaseProvider).borrowLendDao.settlePlannedBill(item.id);
+            ref.read(syncServiceProvider).triggerSync();
+            if (context.mounted) {
+              AppFeedback.showSuccess(context, '"${item.name}" marked as paid');
+            }
+          } catch (e) {
+            if (context.mounted) {
+              AppFeedback.showError(context, 'Failed to settle planned bill', error: e);
+            }
           }
         },
         child: PressableScale(
@@ -671,11 +672,15 @@ class _PlannedBillCard extends ConsumerWidget {
 
 class _HistoryReceivableTile extends StatelessWidget {
   final ReceivablesTableData item;
-  const _HistoryReceivableTile({required this.item});
+  final String householdId;
+  const _HistoryReceivableTile({required this.item, required this.householdId});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isReturned = item.status == 'returned';
+    final statusColor = isReturned ? const Color(0xFF00897B) : const Color(0xFF00897B);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -684,17 +689,56 @@ class _HistoryReceivableTile extends StatelessWidget {
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.2)),
       ),
       child: ListTile(
+        onTap: () => showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          builder: (_) => _AddReceivableSheet(
+            householdId: householdId,
+            existing: item,
+          ),
+        ),
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFF00897B).withValues(alpha: 0.12),
-          child: const Icon(Icons.person_outline_rounded,
-              color: Color(0xFF00897B), size: 20),
+          backgroundColor: statusColor.withValues(alpha: 0.12),
+          child: Icon(
+            isReturned ? Icons.check_circle_outline_rounded : Icons.call_made_rounded,
+            color: statusColor,
+            size: 20,
+          ),
         ),
         title: Text(item.personName,
             style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: const Text('Returned'),
+        subtitle: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: (isReturned ? const Color(0xFF00897B) : const Color(0xFF00897B)).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                isReturned ? 'Returned' : 'Open',
+                style: TextStyle(
+                  color: isReturned ? const Color(0xFF00897B) : const Color(0xFF00897B),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            if (item.dueDate != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                'Due: ${item.dueDate!.day}/${item.dueDate!.month}/${item.dueDate!.year}',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
+              ),
+            ],
+          ],
+        ),
         trailing: MoneyText(Money(item.amountPaise),
-            style: const TextStyle(
-                fontWeight: FontWeight.w700, color: Color(0xFF00897B))),
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: statusColor)),
       ),
     );
   }
@@ -702,11 +746,15 @@ class _HistoryReceivableTile extends StatelessWidget {
 
 class _HistoryBillTile extends StatelessWidget {
   final PlannedBillsTableData item;
-  const _HistoryBillTile({required this.item});
+  final String householdId;
+  const _HistoryBillTile({required this.item, required this.householdId});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isPaid = item.isPaid;
+    final statusColor = isPaid ? const Color(0xFF5C6BC0) : const Color(0xFFEF4444);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -715,17 +763,56 @@ class _HistoryBillTile extends StatelessWidget {
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.2)),
       ),
       child: ListTile(
+        onTap: () => showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          builder: (_) => _AddPlannedBillSheet(
+            householdId: householdId,
+            existing: item,
+          ),
+        ),
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFF5C6BC0).withValues(alpha: 0.12),
-          child: const Icon(Icons.receipt_long_rounded,
-              color: Color(0xFF5C6BC0), size: 20),
+          backgroundColor: statusColor.withValues(alpha: 0.12),
+          child: Icon(
+            isPaid ? Icons.check_circle_outline_rounded : Icons.call_received_rounded,
+            color: statusColor,
+            size: 20,
+          ),
         ),
         title: Text(item.name,
             style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: const Text('Paid'),
+        subtitle: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                isPaid ? 'Paid' : 'Pending',
+                style: TextStyle(
+                  color: statusColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            if (item.dueDate != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                'Due: ${item.dueDate!.day}/${item.dueDate!.month}/${item.dueDate!.year}',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
+              ),
+            ],
+          ],
+        ),
         trailing: MoneyText(Money(item.amountPaise),
-            style: const TextStyle(
-                fontWeight: FontWeight.w700, color: Color(0xFF5C6BC0))),
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: statusColor)),
       ),
     );
   }
@@ -907,8 +994,10 @@ class _AddReceivableSheetState extends ConsumerState<_AddReceivableSheet> {
           TextField(
             controller: _amountCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [AppInputFormatters.positiveDecimal()],
             decoration: InputDecoration(
               labelText: 'Amount (₹) *',
+              hintText: '0.00',
               prefixText: '₹ ',
               prefixIcon: const Icon(Icons.currency_rupee_rounded),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -957,11 +1046,23 @@ class _AddReceivableSheetState extends ConsumerState<_AddReceivableSheet> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      await ref
-                          .read(appDatabaseProvider)
-                          .borrowLendDao
-                          .deleteReceivable(widget.existing!.id);
-                      if (context.mounted) Navigator.pop(context);
+                      final confirmed = await AppFeedback.showConfirmDialog(
+                        context,
+                        title: 'Delete Receivable?',
+                        message: 'Are you sure you want to delete this receivable from "${widget.existing!.personName}"?',
+                        confirmLabel: 'Delete',
+                      );
+                      if (confirmed && context.mounted) {
+                        await ref
+                            .read(appDatabaseProvider)
+                            .borrowLendDao
+                            .deleteReceivable(widget.existing!.id);
+                        ref.read(syncServiceProvider).triggerSync();
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          AppFeedback.showSuccess(context, 'Receivable deleted.');
+                        }
+                      }
                     },
                     icon: const Icon(Icons.delete_outline_rounded,
                         color: Colors.red),
@@ -993,10 +1094,16 @@ class _AddReceivableSheetState extends ConsumerState<_AddReceivableSheet> {
 
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      AppFeedback.showWarning(context, 'Please enter a person or beneficiary name.');
+      return;
+    }
     final amountPaise =
         ((double.tryParse(_amountCtrl.text) ?? 0) * 100).round();
-    if (amountPaise <= 0) return;
+    if (amountPaise <= 0) {
+      AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -1009,7 +1116,19 @@ class _AddReceivableSheetState extends ConsumerState<_AddReceivableSheet> {
             existingEntryId: widget.existing?.entryId,
           );
       ref.read(syncServiceProvider).triggerSync();
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+        AppFeedback.showSuccess(
+          context,
+          widget.existing != null
+              ? 'Receivable updated successfully!'
+              : 'Receivable saved successfully!',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.showError(context, 'Failed to save receivable', error: e);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1097,8 +1216,10 @@ class _AddPlannedBillSheetState extends ConsumerState<_AddPlannedBillSheet> {
           TextField(
             controller: _amountCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [AppInputFormatters.positiveDecimal()],
             decoration: InputDecoration(
               labelText: 'Amount (₹) *',
+              hintText: '0.00',
               prefixText: '₹ ',
               prefixIcon: const Icon(Icons.currency_rupee_rounded),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -1147,11 +1268,23 @@ class _AddPlannedBillSheetState extends ConsumerState<_AddPlannedBillSheet> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      await ref
-                          .read(appDatabaseProvider)
-                          .borrowLendDao
-                          .deletePlannedBill(widget.existing!.id);
-                      if (context.mounted) Navigator.pop(context);
+                      final confirmed = await AppFeedback.showConfirmDialog(
+                        context,
+                        title: 'Delete Record?',
+                        message: 'Are you sure you want to delete "${widget.existing!.name}"?',
+                        confirmLabel: 'Delete',
+                      );
+                      if (confirmed && context.mounted) {
+                        await ref
+                            .read(appDatabaseProvider)
+                            .borrowLendDao
+                            .deletePlannedBill(widget.existing!.id);
+                        ref.read(syncServiceProvider).triggerSync();
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          AppFeedback.showSuccess(context, 'Record deleted.');
+                        }
+                      }
                     },
                     icon: const Icon(Icons.delete_outline_rounded,
                         color: Colors.red),
@@ -1183,10 +1316,16 @@ class _AddPlannedBillSheetState extends ConsumerState<_AddPlannedBillSheet> {
 
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      AppFeedback.showWarning(context, 'Please enter a description or person name.');
+      return;
+    }
     final amountPaise =
         ((double.tryParse(_amountCtrl.text) ?? 0) * 100).round();
-    if (amountPaise <= 0) return;
+    if (amountPaise <= 0) {
+      AppFeedback.showWarning(context, 'Please enter an amount greater than ₹0.');
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -1199,7 +1338,19 @@ class _AddPlannedBillSheetState extends ConsumerState<_AddPlannedBillSheet> {
             existingEntryId: widget.existing?.entryId,
           );
       ref.read(syncServiceProvider).triggerSync();
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+        AppFeedback.showSuccess(
+          context,
+          widget.existing != null
+              ? 'Record updated successfully!'
+              : 'Record saved successfully!',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.showError(context, 'Failed to save record', error: e);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

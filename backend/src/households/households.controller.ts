@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { HouseholdsService } from './households.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CreateHouseholdDto, JoinHouseholdDto, UpdateHouseholdDto } from './dto/household.dto';
 
 @ApiTags('households')
 @ApiBearerAuth()
@@ -22,14 +23,14 @@ export class HouseholdsController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new household and generate its ID' })
-  create(@Req() req: any, @Body('name') name?: string) {
-    return this.householdsService.create(req.user.userId, name);
+  create(@Req() req: any, @Body() body: CreateHouseholdDto) {
+    return this.householdsService.create(req.user.userId, body.name);
   }
 
   @Post('join')
   @ApiOperation({ summary: 'Join an existing household by household ID' })
-  join(@Req() req: any, @Body('householdId') householdId: string) {
-    return this.householdsService.join(req.user.userId, householdId);
+  join(@Req() req: any, @Body() body: JoinHouseholdDto) {
+    return this.householdsService.join(req.user.userId, body.householdId);
   }
 
   @Get('me')
@@ -40,8 +41,8 @@ export class HouseholdsController {
 
   @Patch('me')
   @ApiOperation({ summary: 'Update household name (Owner only)' })
-  updateName(@Req() req: any, @Body('name') name: string) {
-    return this.householdsService.updateName(req.user.userId, name);
+  updateName(@Req() req: any, @Body() body: UpdateHouseholdDto) {
+    return this.householdsService.updateName(req.user.userId, body.name);
   }
 
   @Delete('me')

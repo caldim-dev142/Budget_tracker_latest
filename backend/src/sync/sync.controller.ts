@@ -1,11 +1,13 @@
 import { Controller, Get, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { SyncService, SyncBatchDto } from './sync.service';
+import { SyncService } from './sync.service';
+import { SyncBatchDto } from './dto/sync-batch.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { HouseholdGuard } from '../auth/guards/household.guard';
 
 @ApiTags('sync')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @Controller('sync')
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}

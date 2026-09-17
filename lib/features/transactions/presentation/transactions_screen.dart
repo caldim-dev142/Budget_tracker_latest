@@ -11,6 +11,7 @@ import '../../../core/utils/money.dart';
 import '../../../core/utils/timezone_utils.dart';
 import '../../../data/local/database.dart';
 import '../../../core/services/sync_service.dart';
+import '../../../core/utils/app_feedback.dart';
 import '../../../core/utils/category_icons.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
 import '../../settings/providers/settings_providers.dart';
@@ -160,7 +161,16 @@ class _EntriesList extends ConsumerWidget {
           ],
         ),
       ),
-      error: (err, _) => Center(child: Text('Error loading entries: $err')),
+      error: (err, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            AppFeedback.formatError(err),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: cs.error),
+          ),
+        ),
+      ),
       data: (list) {
         final catMap = catsAsync.valueOrNull ?? {};
 
@@ -327,39 +337,26 @@ class _EntryTile extends ConsumerWidget {
         child: Icon(Icons.delete_outline_rounded, color: cs.onErrorContainer, size: 24),
       ),
       confirmDismiss: (_) async {
-        return showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('Delete Entry'),
-            content: const Text('Delete this entry? This cannot be undone.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Delete'),
-              ),
-            ],
-          ),
+        return AppFeedback.showConfirmDialog(
+          context,
+          title: 'Delete Entry',
+          message: 'Delete this entry? This cannot be undone.',
+          confirmLabel: 'Delete',
+          isDestructive: true,
         );
       },
       onDismissed: (_) async {
-        final db = ref.read(appDatabaseProvider);
-        await db.entryDao.softDelete(entry.id);
-        ref.read(syncServiceProvider).triggerSync();
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Entry deleted'),
-              duration: const Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-          );
+        try {
+          final db = ref.read(appDatabaseProvider);
+          await db.entryDao.softDelete(entry.id);
+          ref.read(syncServiceProvider).triggerSync();
+          if (context.mounted) {
+            AppFeedback.showSuccess(context, 'Entry deleted.');
+          }
+        } catch (e) {
+          if (context.mounted) {
+            AppFeedback.showError(context, 'Failed to delete entry', error: e);
+          }
         }
       },
       child: PressableScale(

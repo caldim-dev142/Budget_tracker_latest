@@ -2,10 +2,11 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Req } from
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PlanningService } from './planning.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { HouseholdGuard } from '../auth/guards/household.guard';
 
 @ApiTags('planning')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 @Controller('planning')
 export class PlanningController {
   constructor(private readonly planningService: PlanningService) {}

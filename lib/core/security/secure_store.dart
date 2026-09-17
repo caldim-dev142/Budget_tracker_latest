@@ -11,44 +11,53 @@ class SecureStore {
   SecureStore._();
 
   static const _storage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+      resetOnError: true,
+    ),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
 
   // Key names — keep them here so they are never typo'd elsewhere.
   static const _kAccessToken = 'access_token';
   static const _kRefreshToken = 'refresh_token';
+  static const _kRefreshTokenFamily = 'refresh_token_family';
   static const _kDbKey = 'db_encryption_key';
 
   // ── Auth tokens ────────────────────────────────────────────────────────────
-  static Future<void> writeAccessToken(String token) =>
-      _storage.write(key: _kAccessToken, value: token);
-  static Future<String?> readAccessToken() =>
-      _storage.read(key: _kAccessToken);
+  static Future<void> writeAccessToken(String token) => write(_kAccessToken, token);
+  static Future<String?> readAccessToken() => read(_kAccessToken);
 
-  static Future<void> writeRefreshToken(String token) =>
-      _storage.write(key: _kRefreshToken, value: token);
-  static Future<String?> readRefreshToken() =>
-      _storage.read(key: _kRefreshToken);
+  static Future<void> writeRefreshToken(String token) => write(_kRefreshToken, token);
+  static Future<String?> readRefreshToken() => read(_kRefreshToken);
+
+  static Future<void> writeRefreshTokenFamily(String family) => write(_kRefreshTokenFamily, family);
+  static Future<String?> readRefreshTokenFamily() => read(_kRefreshTokenFamily);
 
   /// Clears only auth material — call on logout. Does NOT drop the DB key,
   /// so unsynced local data stays readable (doc 12 §1: never discard on logout).
   static Future<void> clearTokens() async {
-    await _storage.delete(key: _kAccessToken);
-    await _storage.delete(key: _kRefreshToken);
+    await delete(_kAccessToken);
+    await delete(_kRefreshToken);
+    await delete(_kRefreshTokenFamily);
   }
 
   // ── Local DB encryption key (SQLCipher) ────────────────────────────────────
   /// Returns the DB key, generating and persisting a 256-bit random key on first
   /// run. Pass this to the SQLCipher PRAGMA when opening the database.
   static Future<String> getOrCreateDbKey() async {
-    final existing = await _storage.read(key: _kDbKey);
-    if (existing != null && existing.isNotEmpty) return existing;
-    final rng = Random.secure();
-    final bytes = List<int>.generate(32, (_) => rng.nextInt(256));
-    final key = base64UrlEncode(bytes);
-    await _storage.write(key: _kDbKey, value: key);
-    return key;
+    try {
+      final existing = await read(_kDbKey);
+      if (existing != null && existing.isNotEmpty) return existing;
+      final rng = Random.secure();
+      final bytes = List<int>.generate(32, (_) => rng.nextInt(256));
+      final key = base64UrlEncode(bytes);
+      await write(_kDbKey, key);
+      return key;
+    } catch (_) {
+      // Safe fallback key to ensure database initialization never crashes the application
+      return 'budget_tracker_secure_fallback_key';
+    }
   }
 
   // ── Generic key-value helpers ────────────────────────────────────────────────

@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 
 import '../../../core/utils/money.dart';
+import '../../../core/utils/app_feedback.dart';
+import '../../../core/utils/input_formatters.dart';
 import '../../../shared/widgets/money_text.dart';
 import '../../../shared/widgets/pressable_scale.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
@@ -53,7 +55,7 @@ class SavingScreen extends ConsumerWidget {
           padding: EdgeInsets.all(16),
           child: SkeletonLoader(width: double.infinity, height: 120, borderRadius: 18),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => Center(child: Text(AppFeedback.formatError(e))),
         data: (goals) {
           if (goals.isEmpty) {
             return Center(
@@ -135,7 +137,7 @@ class SavingScreen extends ConsumerWidget {
   void _showAddGoalDialog(BuildContext context, WidgetRef ref) {
     final nameCtrl = TextEditingController();
     final targetCtrl = TextEditingController();
-    final monthlyCtrl = TextEditingController(text: '0');
+    final monthlyCtrl = TextEditingController();
     String bucket = 'other_goals';
 
     showDialog(
@@ -170,8 +172,10 @@ class SavingScreen extends ConsumerWidget {
                 TextField(
                   controller: targetCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [AppInputFormatters.positiveDecimal()],
                   decoration: const InputDecoration(
                     labelText: 'Target Amount (₹, optional)',
+                    hintText: '0.00',
                     prefixText: '₹ ',
                   ),
                 ),
@@ -179,8 +183,10 @@ class SavingScreen extends ConsumerWidget {
                 TextField(
                   controller: monthlyCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [AppInputFormatters.positiveDecimal()],
                   decoration: const InputDecoration(
                     labelText: 'Monthly Budget (₹)',
+                    hintText: '0.00',
                     prefixText: '₹ ',
                   ),
                 ),
@@ -195,7 +201,10 @@ class SavingScreen extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a goal name.');
+                  return;
+                }
 
                 final targetPaise = targetCtrl.text.isEmpty
                     ? null
@@ -241,13 +250,7 @@ class SavingScreen extends ConsumerWidget {
 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Goal "$name" created!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  AppFeedback.showSuccess(context, 'Goal "$name" created!');
                 }
               },
               child: const Text('Save'),
@@ -266,6 +269,14 @@ class SavingScreen extends ConsumerWidget {
     final monthlyCtrl = TextEditingController(
       text: (goal.monthlyBudgetPaise / 100).toStringAsFixed(0),
     );
+
+
+
+
+
+
+
+    
     String bucket = goal.bucket;
 
     showDialog(
@@ -282,11 +293,12 @@ class SavingScreen extends ConsumerWidget {
                   controller: nameCtrl,
                   decoration: const InputDecoration(
                     labelText: 'Goal Name *',
+                    hintText: 'e.g. Dream Home Fund',
                   ),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: bucket,
+                  initialValue: bucket,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: const [
                     DropdownMenuItem(value: 'retirement', child: Text('Retirement')),
@@ -299,8 +311,10 @@ class SavingScreen extends ConsumerWidget {
                 TextField(
                   controller: targetCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [AppInputFormatters.positiveDecimal()],
                   decoration: const InputDecoration(
                     labelText: 'Target Amount (₹, optional)',
+                    hintText: '0.00',
                     prefixText: '₹ ',
                   ),
                 ),
@@ -308,8 +322,10 @@ class SavingScreen extends ConsumerWidget {
                 TextField(
                   controller: monthlyCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [AppInputFormatters.positiveDecimal()],
                   decoration: const InputDecoration(
                     labelText: 'Monthly Budget (₹)',
+                    hintText: '0.00',
                     prefixText: '₹ ',
                   ),
                 ),
@@ -324,7 +340,10 @@ class SavingScreen extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
+                if (name.isEmpty) {
+                  AppFeedback.showWarning(context, 'Please enter a goal name.');
+                  return;
+                }
 
                 final targetPaise = targetCtrl.text.isEmpty
                     ? null
@@ -348,13 +367,7 @@ class SavingScreen extends ConsumerWidget {
 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Goal "$name" updated!'),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
+                  AppFeedback.showSuccess(context, 'Goal "$name" updated!');
                 }
               },
               child: const Text('Save'),
@@ -400,7 +413,7 @@ class _GoalCard extends ConsumerWidget {
 
     return contribsAsync.when(
       loading: () => const Card(child: Padding(padding: EdgeInsets.all(16), child: LinearProgressIndicator())),
-      error: (e, _) => Card(child: Text('Error: $e')),
+      error: (e, _) => Card(child: Text(AppFeedback.formatError(e))),
       data: (contribs) {
         final lifetimePaise = contribs.fold<int>(0, (s, c) => s + c.amountPaise);
         final lifetime = Money(lifetimePaise);
@@ -577,8 +590,10 @@ class _GoalCard extends ConsumerWidget {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
               decoration: const InputDecoration(
                 labelText: 'Amount (₹) *',
+                hintText: '0.00',
                 prefixText: '₹ ',
               ),
             ),
@@ -587,6 +602,7 @@ class _GoalCard extends ConsumerWidget {
               controller: noteCtrl,
               decoration: const InputDecoration(
                 labelText: 'Note (optional)',
+                hintText: 'e.g. SIP installment, Bonus deposit',
               ),
             ),
           ],
@@ -600,7 +616,10 @@ class _GoalCard extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amount = double.tryParse(amountCtrl.text) ?? 0;
-              if (amount <= 0) return;
+              if (amount <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
               final db = ref.read(appDatabaseProvider);
 
               await db.goalDao.insertContribution(
@@ -619,13 +638,7 @@ class _GoalCard extends ConsumerWidget {
 
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('₹$amount contributed to ${goal.name}!'),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
+                AppFeedback.showSuccess(context, '₹${amount.toStringAsFixed(2)} contributed to ${goal.name}!');
               }
             },
             child: const Text('Save'),
@@ -637,23 +650,11 @@ class _GoalCard extends ConsumerWidget {
 
   Future<void> _archiveGoal(
       BuildContext context, WidgetRef ref, SavingGoalsTableData goal) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Archive Goal'),
-        content: Text('Archive "${goal.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Archive'),
-          ),
-        ],
-      ),
+    final confirmed = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Archive Goal?',
+      message: 'Are you sure you want to archive "${goal.name}"?',
+      confirmLabel: 'Archive',
     );
 
     if (confirmed == true) {
@@ -662,29 +663,20 @@ class _GoalCard extends ConsumerWidget {
             ..where((g) => g.id.equals(goal.id)))
           .write(SavingGoalsTableCompanion(archivedAt: Value(DateTime.now())));
       ref.read(syncServiceProvider).triggerSync();
+      if (context.mounted) {
+        AppFeedback.showSuccess(context, 'Goal "${goal.name}" archived.');
+      }
     }
   }
 
   Future<void> _deleteGoal(
       BuildContext context, WidgetRef ref, SavingGoalsTableData goal) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Saving Goal?'),
-        content: Text('Remove goal "${goal.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await AppFeedback.showConfirmDialog(
+      context,
+      title: 'Delete Saving Goal?',
+      message: 'Remove goal "${goal.name}"?',
+      confirmLabel: 'Delete',
+      isDestructive: true,
     );
 
     if (confirmed == true) {
@@ -693,13 +685,7 @@ class _GoalCard extends ConsumerWidget {
           .write(SavingGoalsTableCompanion(archivedAt: Value(DateTime.now())));
       ref.read(syncServiceProvider).triggerSync();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Goal "${goal.name}" deleted.'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
+        AppFeedback.showSuccess(context, 'Goal "${goal.name}" deleted.');
       }
     }
   }
@@ -756,9 +742,23 @@ class _GoalCard extends ConsumerWidget {
                               IconButton(
                                 icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
                                 onPressed: () async {
-                                  final db = ref.read(appDatabaseProvider);
-                                  await (db.delete(db.goalContributionsTable)..where((gc) => gc.id.equals(c.id))).go();
-                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  final confirm = await AppFeedback.showConfirmDialog(
+                                    context,
+                                    title: 'Delete Contribution',
+                                    message: 'Are you sure you want to delete this contribution?',
+                                    confirmLabel: 'Delete',
+                                    isDestructive: true,
+                                  );
+                                  if (confirm == true) {
+                                    final db = ref.read(appDatabaseProvider);
+                                    await db.syncQueueDao.enqueueDeletion(entity: 'goal_contribution', entityId: c.id);
+                                    await (db.delete(db.goalContributionsTable)..where((gc) => gc.id.equals(c.id))).go();
+                                    ref.read(syncServiceProvider).triggerSync();
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    if (context.mounted) {
+                                      AppFeedback.showSuccess(context, 'Contribution deleted.');
+                                    }
+                                  }
                                 },
                               ),
                             ],
@@ -788,7 +788,12 @@ class _GoalCard extends ConsumerWidget {
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount (₹) *', prefixText: '₹ '),
+              inputFormatters: [AppInputFormatters.positiveDecimal()],
+              decoration: const InputDecoration(
+                labelText: 'Amount (₹) *',
+                hintText: '0.00',
+                prefixText: '₹ ',
+              ),
             ),
           ],
         ),
@@ -798,15 +803,22 @@ class _GoalCard extends ConsumerWidget {
           FilledButton(
             onPressed: () async {
               final amt = double.tryParse(amountCtrl.text) ?? 0;
-              if (amt <= 0) return;
+              if (amt <= 0) {
+                AppFeedback.showWarning(context, 'Please enter an amount greater than zero.');
+                return;
+              }
 
               final db = ref.read(appDatabaseProvider);
               await (db.update(db.goalContributionsTable)..where((gc) => gc.id.equals(c.id)))
                   .write(GoalContributionsTableCompanion(
                 amountPaise: Value((amt * 100).round()),
               ));
+              ref.read(syncServiceProvider).triggerSync();
 
-              if (context.mounted) Navigator.pop(context);
+              if (context.mounted) {
+                Navigator.pop(context);
+                AppFeedback.showSuccess(context, 'Contribution updated!');
+              }
             },
             child: const Text('Save'),
           ),

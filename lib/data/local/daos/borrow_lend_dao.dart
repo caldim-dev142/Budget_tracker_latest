@@ -107,28 +107,54 @@ class BorrowLendDao extends DatabaseAccessor<AppDatabase>
     );
   }
 
-  /// Mark a receivable as returned and soft-delete its linked entry.
+  /// Mark a receivable as returned:
+  ///   1. Soft-delete the original 'lend-system-cat' adjustment entry (money OUT).
+  ///   2. Create a new 'return-received-system-cat' adjustment entry (money BACK IN)
+  ///      so the returned amount is added to the Adjustments bucket of the waterfall.
   Future<void> settleReceivable(String id) async {
     final rec = await getReceivable(id);
     if (rec == null) return;
 
+    final now = DateTime.now();
+    final returnCatId = 'return-received-system-cat-${rec.householdId}';
+
+    // 1. Soft-delete the original lend entry (money that was lent out).
     if (rec.entryId != null) {
       await (update(entriesTable)..where((e) => e.id.equals(rec.entryId!)))
-          .write(EntriesTableCompanion(deletedAt: Value(DateTime.now())));
+          .write(EntriesTableCompanion(deletedAt: Value(now)));
     }
+
+    // 2. Create a settlement entry: money returned is an income-adjustment (adds to adjustments).
+    final settlementEntryId = _uuid.v4();
+    await into(entriesTable).insertOnConflictUpdate(
+      EntriesTableCompanion.insert(
+        id: settlementEntryId,
+        householdId: rec.householdId,
+        categoryId: returnCatId,
+        kind: 'adjustment',
+        entryDate: now,
+        amountPaise: rec.amountPaise,
+        note: Value('Returned by: ${rec.personName}'),
+        createdBy: rec.householdId,
+        version: const Value(1),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
 
     await (update(receivablesTable)..where((r) => r.id.equals(id))).write(
       const ReceivablesTableCompanion(status: Value('returned')),
     );
   }
 
-  /// Delete a receivable and its linked entry permanently.
+  /// Delete a receivable and soft-delete its linked entry (preserving tombstone for sync).
   Future<void> deleteReceivable(String id) async {
     final rec = await getReceivable(id);
+    // Propagate the hard delete to the server and other devices (DEF-SYNC-01).
+    await attachedDatabase.syncQueueDao.enqueueDeletion(entity: 'receivable', entityId: id);
     if (rec?.entryId != null) {
-      await (delete(entriesTable)
-            ..where((e) => e.id.equals(rec!.entryId!)))
-          .go();
+      await (update(entriesTable)..where((e) => e.id.equals(rec!.entryId!)))
+          .write(EntriesTableCompanion(deletedAt: Value(DateTime.now())));
     }
     await (delete(receivablesTable)..where((r) => r.id.equals(id))).go();
   }
@@ -211,28 +237,54 @@ class BorrowLendDao extends DatabaseAccessor<AppDatabase>
     );
   }
 
-  /// Mark a planned bill as paid and soft-delete its linked entry.
+  /// Mark a planned bill as paid:
+  ///   1. Soft-delete the original 'borrow-system-cat' adjustment entry (money IN as borrowed).
+  ///   2. Create a new 'bill-pay-system-cat' spending entry (money OUT as payment)
+  ///      so the payment is deducted in the Spending bucket of the waterfall.
   Future<void> settlePlannedBill(String id) async {
     final bill = await getBill(id);
     if (bill == null) return;
 
+    final now = DateTime.now();
+    final billPayCatId = 'bill-pay-system-cat-${bill.householdId}';
+
+    // 1. Soft-delete the original borrow entry (the planned liability).
     if (bill.entryId != null) {
       await (update(entriesTable)..where((e) => e.id.equals(bill.entryId!)))
-          .write(EntriesTableCompanion(deletedAt: Value(DateTime.now())));
+          .write(EntriesTableCompanion(deletedAt: Value(now)));
     }
+
+    // 2. Create a payment entry: paying a bill is spending (deducted from balance).
+    final paymentEntryId = _uuid.v4();
+    await into(entriesTable).insertOnConflictUpdate(
+      EntriesTableCompanion.insert(
+        id: paymentEntryId,
+        householdId: bill.householdId,
+        categoryId: billPayCatId,
+        kind: 'spending',
+        entryDate: now,
+        amountPaise: bill.amountPaise,
+        note: Value('Paid: ${bill.name}'),
+        createdBy: bill.householdId,
+        version: const Value(1),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
 
     await (update(plannedBillsTable)..where((b) => b.id.equals(id))).write(
       const PlannedBillsTableCompanion(isPaid: Value(true)),
     );
   }
 
-  /// Delete a planned bill and its linked entry permanently.
+  /// Delete a planned bill and soft-delete its linked entry (preserving tombstone for sync).
   Future<void> deletePlannedBill(String id) async {
     final bill = await getBill(id);
+    // Propagate the hard delete to the server and other devices (DEF-SYNC-01).
+    await attachedDatabase.syncQueueDao.enqueueDeletion(entity: 'planned_bill', entityId: id);
     if (bill?.entryId != null) {
-      await (delete(entriesTable)
-            ..where((e) => e.id.equals(bill!.entryId!)))
-          .go();
+      await (update(entriesTable)..where((e) => e.id.equals(bill!.entryId!)))
+          .write(EntriesTableCompanion(deletedAt: Value(DateTime.now())));
     }
     await (delete(plannedBillsTable)..where((b) => b.id.equals(id))).go();
   }

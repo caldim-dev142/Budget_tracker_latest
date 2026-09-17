@@ -3,27 +3,28 @@ import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 import '../../../domain/entities/entry.dart';
 import '../../features/auth/providers/auth_providers.dart';
 import '../../data/local/database.dart';
+import '../../data/local/daos/sync_queue_dao.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'app_init_service.dart';
 
 final syncServiceProvider = Provider<SyncService>((ref) => SyncService(ref));
+const _uuid = Uuid();
 
 class SyncService {
   final Ref _ref;
-  final _dio = Dio(
-    BaseOptions(
-      contentType: 'application/json',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    ),
-  );
+  Dio get _dio => _ref.read(authenticatedDioProvider);
   final Connectivity _connectivity = Connectivity();
   bool _isSyncing = false;
+  // Set when triggerSync() is called while a sync is already in flight, so the mutation
+  // that arrived mid-sync isn't silently dropped (data-persistence audit fix, 2026-09-17):
+  // a rapid second mutation (e.g. creating a card right after an account) used to hit
+  // `if (_isSyncing) return;` and vanish — the item stayed correctly saved locally but never
+  // got pushed until some unrelated later action happened to trigger another sync.
+  bool _hasPendingSync = false;
 
   SyncService(this._ref) {
     _connectivity.onConnectivityChanged.listen((List<ConnectivityResult> results) {
@@ -37,10 +38,16 @@ class SyncService {
 
   /// Fire-and-forget background sync triggered on any data mutation
   Future<void> triggerSync() async {
-    if (_isSyncing) return;
+    if (_isSyncing) {
+      _hasPendingSync = true;
+      return;
+    }
     _isSyncing = true;
     try {
-      await syncAllQueue();
+      do {
+        _hasPendingSync = false;
+        await syncAllQueue();
+      } while (_hasPendingSync);
     } catch (e) {
       debugPrint('Auto-sync triggered error: $e');
     } finally {
@@ -52,7 +59,7 @@ class SyncService {
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
-    if (authState == null || authState.authMode != AuthMode.authenticated) {
+    if (serverUrl.isEmpty || authState == null || authState.authMode != AuthMode.authenticated) {
       return;
     }
 
@@ -117,19 +124,31 @@ class SyncService {
     }
   }
 
-  Future<int> syncAllQueue() async {
+  Future<int> syncAllQueue({bool throwOnError = false}) async {
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
+    if (serverUrl.isEmpty) {
+      if (throwOnError) throw Exception('Server URL is not configured. Please check backend URL in Settings.');
+      return 0;
+    }
+
     if (authState == null || authState.authMode != AuthMode.authenticated) {
+      if (throwOnError) throw Exception('You are not signed in. Please sign in or register to sync data to the database.');
       return 0;
     }
 
     final householdId = authState.householdId;
-    if (householdId == null || householdId.isEmpty) return 0;
+    if (householdId == null || householdId.isEmpty) {
+      if (throwOnError) throw Exception('No active household found for your account. Please log in again.');
+      return 0;
+    }
 
     final token = authState.token;
-    if (token == null) return 0;
+    if (token == null) {
+      if (throwOnError) throw Exception('Session token is missing. Please log in again.');
+      return 0;
+    }
 
     final db = _ref.read(appDatabaseProvider);
 
@@ -144,6 +163,8 @@ class SyncService {
     int successCount = 0;
     for (final op in pending) {
       if (op.entity == 'entry') {
+        // An op the server keeps rejecting (e.g. an entry in a closed month) is not retried forever.
+        if (op.attempts >= SyncQueueDao.maxAttempts) continue;
         try {
           final payload = jsonDecode(op.payload);
           // If payload contains householdId, verify it matches currently active household
@@ -151,8 +172,8 @@ class SyncService {
             continue; // Skip sync ops belonging to other households
           }
 
-          if (op.op == 'insert') {
-            await _dio.post(
+          if (op.op == 'insert' || op.op == 'update' || op.op == 'delete') {
+            final res = await _dio.post(
               '$serverUrl/entries/batch',
               data: [payload],
               options: Options(
@@ -161,11 +182,21 @@ class SyncService {
                 },
               ),
             );
+            // The endpoint returns 201 with {synced, failed}; a rejected entry must stay queued.
+            final body = res.data;
+            final failed = body is Map ? ((body['failed'] as num?)?.toInt() ?? 0) : 0;
+            if (failed > 0) {
+              await db.syncQueueDao.incrementAttempts(op.id);
+              continue;
+            }
           }
           await db.syncQueueDao.markSynced(op.id);
           successCount++;
         } catch (e) {
           // Retry later on reconnection
+          try {
+            await db.syncQueueDao.incrementAttempts(op.id);
+          } catch (_) {}
         }
       }
     }
@@ -205,8 +236,11 @@ class SyncService {
         'isActive': c.isActive,
       }).toList();
 
-      // Card Transactions
-      final cardTxns = await (db.select(db.cardTransactionsTable)).get();
+      // Card Transactions (scoped strictly to active household's cards)
+      final cardIds = cards.map((c) => c.id).toSet();
+      final cardTxns = cardIds.isEmpty
+          ? <CardTransactionsTableData>[]
+          : await (db.select(db.cardTransactionsTable)..where((t) => t.cardId.isIn(cardIds))).get();
       final cardTxnsPayload = cardTxns.map((t) => {
         'id': t.id,
         'cardId': t.cardId,
@@ -249,8 +283,11 @@ class SyncService {
         'archivedAt': g.archivedAt?.toIso8601String(),
       }).toList();
 
-      // Goal Contributions
-      final goalContribs = await (db.select(db.goalContributionsTable)).get();
+      // Goal Contributions (scoped strictly to active household's goals)
+      final goalIds = goals.map((g) => g.id).toSet();
+      final goalContribs = goalIds.isEmpty
+          ? <GoalContributionsTableData>[]
+          : await (db.select(db.goalContributionsTable)..where((c) => c.goalId.isIn(goalIds))).get();
       final goalContribsPayload = goalContribs.map((c) => {
         'id': c.id,
         'goalId': c.goalId,
@@ -268,8 +305,11 @@ class SyncService {
         'archivedAt': f.archivedAt?.toIso8601String(),
       }).toList();
 
-      // Fund Movements
-      final fundMovements = await (db.select(db.fundMovementsTable)).get();
+      // Fund Movements (scoped strictly to active household's funds)
+      final fundIds = funds.map((f) => f.id).toSet();
+      final fundMovements = fundIds.isEmpty
+          ? <FundMovementsTableData>[]
+          : await (db.select(db.fundMovementsTable)..where((m) => m.fundId.isIn(fundIds))).get();
       final fundMovementsPayload = fundMovements.map((m) => {
         'id': m.id,
         'fundId': m.fundId,
@@ -288,6 +328,16 @@ class SyncService {
         'amountPaise': b.amountPaise,
       }).toList();
 
+      // Reserve Lines
+      final reserveLines = await (db.select(db.reserveLinesTable)..where((r) => r.householdId.equals(householdId))).get();
+      final reserveLinesPayload = reserveLines.map((r) => {
+        'id': r.id,
+        'yearMonth': r.yearMonth,
+        'name': r.name,
+        'amountPaise': r.amountPaise,
+        'source': r.source,
+      }).toList();
+
       // Entries
       final allEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId))).get();
       final entriesPayload = allEntries.map((e) => {
@@ -303,7 +353,26 @@ class SyncService {
         'version': e.version,
         'createdAt': e.createdAt.toIso8601String(),
         'updatedAt': e.updatedAt.toIso8601String(),
+        'deletedAt': e.deletedAt?.toIso8601String(),
       }).toList();
+
+      // Annual Targets
+      final annualTargets = await (db.select(db.annualTargetsTable)..where((t) => t.householdId.equals(householdId))).get();
+      final annualTargetsPayload = annualTargets.map((t) => {
+        'id': t.id,
+        'title': t.title,
+        'targetPaise': t.targetPaise,
+        'type': t.type,
+      }).toList();
+
+      // Pending hard deletions from syncQueue (all deletable entities, incl. annual targets)
+      final pendingAll = await db.syncQueueDao.getPending();
+      final deletionOps = pendingAll
+          .where((op) => op.op == 'delete' && SyncQueueDao.deletableEntities.contains(op.entity))
+          .toList();
+      final deletionsPayload = deletionOps
+          .map((op) => {'entity': op.entity, 'id': op.entityId})
+          .toList();
 
       final batchPayload = {
         'categories': categoriesPayload,
@@ -317,7 +386,10 @@ class SyncService {
         'sinkingFunds': fundsPayload,
         'fundMovements': fundMovementsPayload,
         'budgets': budgetsPayload,
+        'reserveLines': reserveLinesPayload,
+        'annualTargets': annualTargetsPayload,
         'entries': entriesPayload,
+        if (deletionsPayload.isNotEmpty) 'deletions': deletionsPayload,
       };
 
       final res = await _dio.post(
@@ -331,27 +403,50 @@ class SyncService {
       );
       debugPrint('Comprehensive Batch Sync to server successful: ${res.data}');
 
-      // 5. AFTER pushing local data, pull any latest server-side changes to merge
-      await pullFromServer();
+      // Mark delete ops as synced (the server applied them or they were already tombstoned)
+      for (final op in deletionOps) {
+        await db.syncQueueDao.markSynced(op.id);
+      }
 
-      return successCount + allEntries.length;
+      // 4b. Replay month closes/reopens the server has not accepted yet (after the push, so a
+      //     server-side close sees this device's entries).
+      await _replayMonthStatusOps(db, serverUrl, token, householdId);
+
+      // 5. AFTER pushing local data, pull any latest server-side changes to merge
+      final pulledCount = await pullFromServer(throwOnError: throwOnError);
+
+      return successCount + allEntries.length + pulledCount;
     } catch (e) {
       debugPrint('Error during comprehensive batch sync: $e');
+      if (throwOnError) {
+        if (e is DioException && e.response?.statusCode == 401) {
+          throw Exception('Session expired or account no longer exists in database. Please log out and sign in or register again.');
+        }
+        rethrow;
+      }
       return successCount;
     }
   }
 
   /// Pulls all household data from backend PostgreSQL into local SQLite (GET /sync/pull).
-  Future<bool> pullFromServer() async {
+  Future<int> pullFromServer({bool throwOnError = false}) async {
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
+    if (serverUrl.isEmpty) {
+      if (throwOnError) throw Exception('Backend Server URL is not configured. Please check Settings.');
+      return 0;
+    }
     if (authState == null || authState.authMode != AuthMode.authenticated) {
-      return false;
+      if (throwOnError) throw Exception('You are not signed in. Please sign in to sync.');
+      return 0;
     }
 
     final token = authState.token;
-    if (token == null) return false;
+    if (token == null) {
+      if (throwOnError) throw Exception('Session token is missing. Please log in again.');
+      return 0;
+    }
 
     final db = _ref.read(appDatabaseProvider);
     final householdId = authState.householdId ?? 'default';
@@ -367,7 +462,9 @@ class SyncService {
       );
 
       final data = res.data;
-      if (data == null || data is! Map) return false;
+      if (data == null || data is! Map) return 0;
+      final unsentCloses = <String>[];
+      int pulledCount = 0;
 
       await db.transaction(() async {
         // 1. Categories
@@ -382,13 +479,16 @@ class SyncService {
             isDeduction: Value((c['isDeduction'] as bool?) ?? false),
             isSystem: Value((c['isSystem'] as bool?) ?? false),
             sortOrder: Value((c['sortOrder'] as int?) ?? 0),
+            archivedAt: Value(c['archivedAt'] != null ? DateTime.parse(c['archivedAt'] as String) : null),
           )).toList();
           await db.categoryDao.upsertAll(cats);
         }
 
         // 2. Accounts
         if (data['accounts'] != null && data['accounts'] is List) {
-          for (final a in data['accounts'] as List) {
+          final list = data['accounts'] as List;
+          pulledCount += list.length;
+          for (final a in list) {
             await db.accountDao.upsertAccount(AccountsTableCompanion.insert(
               id: a['id'] as String,
               householdId: (a['householdId'] ?? householdId) as String,
@@ -403,7 +503,9 @@ class SyncService {
 
         // 3. Credit Cards
         if (data['creditCards'] != null && data['creditCards'] is List) {
-          for (final c in data['creditCards'] as List) {
+          final list = data['creditCards'] as List;
+          pulledCount += list.length;
+          for (final c in list) {
             await db.into(db.creditCardsTable).insertOnConflictUpdate(CreditCardsTableCompanion.insert(
               id: c['id'] as String,
               householdId: (c['householdId'] ?? householdId) as String,
@@ -416,7 +518,9 @@ class SyncService {
 
         // 4. Card Transactions
         if (data['cardTransactions'] != null && data['cardTransactions'] is List) {
-          for (final t in data['cardTransactions'] as List) {
+          final list = data['cardTransactions'] as List;
+          pulledCount += list.length;
+          for (final t in list) {
             await db.into(db.cardTransactionsTable).insertOnConflictUpdate(CardTransactionsTableCompanion.insert(
               id: t['id'] as String,
               cardId: t['cardId'] as String,
@@ -488,7 +592,9 @@ class SyncService {
 
         // 9. Entries
         if (data['entries'] != null && data['entries'] is List) {
-          for (final e in data['entries'] as List) {
+          final list = data['entries'] as List;
+          pulledCount += list.length;
+          for (final e in list) {
             await db.entryDao.insertEntry(EntriesTableCompanion.insert(
               id: e['id'] as String,
               householdId: (e['householdId'] ?? householdId) as String,
@@ -539,6 +645,14 @@ class SyncService {
         // 12. Budgets
         if (data['budgets'] != null && data['budgets'] is List) {
           for (final b in data['budgets'] as List) {
+            final budgetHouseholdId = (b['householdId'] ?? householdId) as String;
+            await (db.delete(db.budgetsTable)
+                  ..where((t) =>
+                      t.householdId.equals(budgetHouseholdId) &
+                      t.categoryId.equals(b['categoryId'] as String) &
+                      t.yearMonth.equals(b['yearMonth'] as String) &
+                      t.id.equals(b['id'] as String).not()))
+                .go();
             await db.into(db.budgetsTable).insertOnConflictUpdate(BudgetsTableCompanion.insert(
               id: b['id'] as String,
               householdId: (b['householdId'] ?? householdId) as String,
@@ -549,15 +663,275 @@ class SyncService {
           }
         }
 
+        // 13. Reserve Lines
+        if (data['reserveLines'] != null && data['reserveLines'] is List) {
+          for (final rl in data['reserveLines'] as List) {
+            await db.into(db.reserveLinesTable).insertOnConflictUpdate(ReserveLinesTableCompanion.insert(
+              id: rl['id'] as String,
+              householdId: (rl['householdId'] ?? householdId) as String,
+              yearMonth: rl['yearMonth'] as String,
+              name: (rl['name'] ?? 'Reserve') as String,
+              amountPaise: (rl['amountPaise'] as num?)?.toInt() ?? 0,
+              source: Value((rl['source'] as String?) ?? 'manual'),
+            ));
+          }
+        }
+
+        // 14. Annual Targets
+        if (data['annualTargets'] != null && data['annualTargets'] is List) {
+          for (final at in data['annualTargets'] as List) {
+            await db.into(db.annualTargetsTable).insertOnConflictUpdate(AnnualTargetsTableCompanion.insert(
+              id: at['id'] as String,
+              householdId: (at['householdId'] ?? householdId) as String,
+              title: (at['title'] ?? '') as String,
+              targetPaise: (at['targetPaise'] as num?)?.toInt() ?? 0,
+              type: Value((at['type'] as String?) ?? 'income'),
+            ));
+          }
+        }
+
+        // 15. Propagation of deleted entries (prevents resurrection of locally cached records)
+        if (data['deletedEntryIds'] != null && data['deletedEntryIds'] is List) {
+          for (final id in data['deletedEntryIds'] as List) {
+            if (id is String) {
+              await (db.update(db.entriesTable)..where((e) => e.id.equals(id))).write(
+                EntriesTableCompanion(
+                  deletedAt: Value(DateTime.now()),
+                ),
+              );
+            }
+          }
+        }
+        if (data['deletedEntries'] != null && data['deletedEntries'] is List) {
+          for (final de in data['deletedEntries'] as List) {
+            final id = de['id'] as String?;
+            if (id != null) {
+              final deletedAtStr = de['deletedAt'] as String?;
+              final delDate = deletedAtStr != null ? DateTime.tryParse(deletedAtStr) : DateTime.now();
+              await (db.update(db.entriesTable)..where((e) => e.id.equals(id))).write(
+                EntriesTableCompanion(
+                  deletedAt: Value(delDate),
+                ),
+              );
+            }
+          }
+        }
+
+        // 16. Propagation of deleted annual targets from server
+        if (data['deletedAnnualTargetIds'] != null && data['deletedAnnualTargetIds'] is List) {
+          for (final id in data['deletedAnnualTargetIds'] as List) {
+            if (id is String) {
+              await (db.delete(db.annualTargetsTable)..where((t) => t.id.equals(id))).go();
+            }
+          }
+        }
+
+        // 17. Hard deletions made on other devices (server tombstones)
+        final deletedRecords = data['deletedRecords'];
+        if (deletedRecords is Map) {
+          List<String> idsFor(String key) => deletedRecords[key] is List
+              ? (deletedRecords[key] as List).whereType<String>().toList()
+              : const <String>[];
+          final bills = idsFor('plannedBills');
+          if (bills.isNotEmpty) await (db.delete(db.plannedBillsTable)..where((t) => t.id.isIn(bills))).go();
+          final recs = idsFor('receivables');
+          if (recs.isNotEmpty) await (db.delete(db.receivablesTable)..where((t) => t.id.isIn(recs))).go();
+          final txns = idsFor('cardTransactions');
+          if (txns.isNotEmpty) await (db.delete(db.cardTransactionsTable)..where((t) => t.id.isIn(txns))).go();
+          final buds = idsFor('budgets');
+          if (buds.isNotEmpty) await (db.delete(db.budgetsTable)..where((t) => t.id.isIn(buds))).go();
+          final lines = idsFor('reserveLines');
+          if (lines.isNotEmpty) await (db.delete(db.reserveLinesTable)..where((t) => t.id.isIn(lines))).go();
+          final contribs = idsFor('goalContributions');
+          if (contribs.isNotEmpty) await (db.delete(db.goalContributionsTable)..where((t) => t.id.isIn(contribs))).go();
+          final moves = idsFor('fundMovements');
+          if (moves.isNotEmpty) await (db.delete(db.fundMovementsTable)..where((t) => t.id.isIn(moves))).go();
+          final targets = idsFor('annualTargets');
+          if (targets.isNotEmpty) await (db.delete(db.annualTargetsTable)..where((t) => t.id.isIn(targets))).go();
+          // Categories are archived server-side (never hard-deleted), so no tombstone-hard-delete
+          // is needed here. The `categories` list above (step 1) already carries each category's
+          // current archivedAt, so an archive made on another device applies via the normal
+          // upsert in that step, not through deletedRecords.
+        }
+
+        // 18. Month close/reopen made on other devices (DEF-SYNC-07). Applied only to snapshots that
+        //     exist locally (local closing figures are never replaced) and never over a local
+        //     close/reopen that is still waiting in the sync queue.
+        if (data['monthStatuses'] is List) {
+          final pendingMonths = (await db.syncQueueDao.getPending())
+              .where((op) => op.entity == 'month_status')
+              .map((op) => op.entityId)
+              .toSet();
+          for (final ms in data['monthStatuses'] as List) {
+            if (ms is! Map) continue;
+            final ym = ms['yearMonth'];
+            final status = ms['status'];
+            if (ym is! String || pendingMonths.contains(ym)) continue;
+            final changedAt = ms['statusChangedAt'] is String ? DateTime.tryParse(ms['statusChangedAt'] as String) : null;
+            final local = await (db.select(db.monthSnapshotsTable)
+                  ..where((t) => t.householdId.equals(householdId) & t.yearMonth.equals(ym)))
+                .getSingleOrNull();
+            if (local == null) {
+              // A closed month with no local row at all (fresh install / new device / reinstall)
+              // was previously skipped entirely, leaving that month editable forever on this
+              // device even though it's closed everywhere else (data-persistence audit fix,
+              // 2026-09-17). Insert a closed snapshot placeholder; its financial totals are
+              // zeroed here deliberately — they are never read from this placeholder row (the
+              // UI recomputes actuals from entries/accounts), only `status`/`closedAt` matter
+              // for gating further edits to this month.
+              if (status == 'closed') {
+                await db.into(db.monthSnapshotsTable).insert(
+                      MonthSnapshotsTableCompanion.insert(
+                        id: _uuid.v4(),
+                        householdId: householdId,
+                        yearMonth: ym,
+                        status: const Value('closed'),
+                        closedAt: Value(changedAt ?? DateTime.now()),
+                      ),
+                    );
+              }
+              continue;
+            }
+
+            if (status == 'closed' && local.status != 'closed') {
+              await (db.update(db.monthSnapshotsTable)..where((t) => t.id.equals(local.id))).write(
+                MonthSnapshotsTableCompanion(
+                  status: const Value('closed'),
+                  closedAt: Value(changedAt ?? DateTime.now()),
+                ),
+              );
+            } else if (status != 'closed' && local.status == 'closed') {
+              await (db.update(db.monthSnapshotsTable)..where((t) => t.id.equals(local.id))).write(
+                const MonthSnapshotsTableCompanion(
+                  status: Value('open'),
+                  closedAt: Value(null),
+                ),
+              );
+            }
+          }
+        }
+
         // Recalculate account balances after all entries are restored
-        await db.accountDao.recalculateAllAccountBalances();
+        await db.accountDao.recalculateAllAccountBalances(householdId: householdId);
       });
 
-      debugPrint('Successfully pulled and synchronized all household data from server.');
-      return true;
+      for (final ym in unsentCloses) {
+        await db.syncQueueDao.enqueueMonthStatus(householdId: householdId, yearMonth: ym, closed: true);
+      }
+      if (unsentCloses.isNotEmpty) {
+        await _replayMonthStatusOps(db, serverUrl, token, householdId);
+      }
+
+      debugPrint('Successfully pulled and synchronized all household data from server ($pulledCount items).');
+      return pulledCount;
     } catch (e) {
       debugPrint('Failed to pull data from server: $e');
-      return false;
+      if (throwOnError) rethrow;
+      return 0;
+    }
+  }
+
+  /// Notify backend of month close (fire-and-forget).
+  Future<void> notifyMonthClosed(
+    String yearMonth, {
+    required int openingBalance,
+    required int lastMonthReserves,
+    required int income,
+    required int adjustments,
+    required int spending,
+    required int protection,
+    required int saving,
+    required int reserves,
+    required int totalAvailable,
+  }) async {
+    final serverUrl = _ref.read(serverUrlProvider);
+    final authState = _ref.read(authStateProvider).valueOrNull;
+    final queueId = await _queueMonthStatus(authState?.householdId, yearMonth, closed: true);
+    if (serverUrl.isEmpty || authState == null || authState.authMode != AuthMode.authenticated) return;
+    final token = authState.token;
+    if (token == null) return;
+
+    try {
+      await _dio.post(
+        '$serverUrl/months/close?yearMonth=$yearMonth',
+        data: {
+          'openingBalance': openingBalance,
+          'lastMonthReserves': lastMonthReserves,
+          'income': income,
+          'adjustments': adjustments,
+          'spending': spending,
+          'protection': protection,
+          'saving': saving,
+          'reserves': reserves,
+          'totalAvailable': totalAvailable,
+        },
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+      if (queueId != null) await _ref.read(appDatabaseProvider).syncQueueDao.markSynced(queueId);
+    } catch (e) {
+      debugPrint('Failed to notify backend of month close (queued for retry): $e');
+    }
+  }
+
+  /// Notify backend of month reopen (fire-and-forget).
+  Future<void> notifyMonthReopened(String yearMonth) async {
+    final serverUrl = _ref.read(serverUrlProvider);
+    final authState = _ref.read(authStateProvider).valueOrNull;
+    final queueId = await _queueMonthStatus(authState?.householdId, yearMonth, closed: false);
+    if (serverUrl.isEmpty || authState == null || authState.authMode != AuthMode.authenticated) return;
+    final token = authState.token;
+    if (token == null) return;
+
+    try {
+      await _dio.post(
+        '$serverUrl/months/reopen?yearMonth=$yearMonth',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+      if (queueId != null) await _ref.read(appDatabaseProvider).syncQueueDao.markSynced(queueId);
+    } catch (e) {
+      if (e is DioException && e.response?.statusCode == 404 && queueId != null) {
+        // The server never had this month closed — nothing to reopen.
+        await _ref.read(appDatabaseProvider).syncQueueDao.markSynced(queueId);
+        return;
+      }
+      debugPrint('Failed to notify backend of month reopen (queued for retry): $e');
+    }
+  }
+
+  /// Queues a local month close/reopen; returns the queue id, or null when there is no household yet.
+  Future<String?> _queueMonthStatus(String? householdId, String yearMonth, {required bool closed}) async {
+    if (householdId == null || householdId.isEmpty || householdId == 'local') return null;
+    try {
+      await _ref.read(appDatabaseProvider).syncQueueDao
+          .enqueueMonthStatus(householdId: householdId, yearMonth: yearMonth, closed: closed);
+      return 'month_status:$householdId:$yearMonth';
+    } catch (e) {
+      debugPrint('Failed to queue month status change: $e');
+      return null;
+    }
+  }
+
+  /// Sends queued month closes/reopens for this household to the server.
+  Future<void> _replayMonthStatusOps(AppDatabase db, String serverUrl, String token, String householdId) async {
+    final ops = (await db.syncQueueDao.getPending())
+        .where((op) => op.entity == 'month_status' && op.id == 'month_status:$householdId:${op.entityId}')
+        .toList();
+    for (final op in ops) {
+      if (op.attempts >= SyncQueueDao.maxAttempts) continue;
+      final path = op.op == 'close' ? 'close' : 'reopen';
+      try {
+        await _dio.post(
+          '$serverUrl/months/$path?yearMonth=${op.entityId}',
+          options: Options(headers: {'Authorization': 'Bearer $token'}),
+        );
+        await db.syncQueueDao.markSynced(op.id);
+      } catch (e) {
+        if (e is DioException && e.response?.statusCode == 404 && op.op == 'reopen') {
+          await db.syncQueueDao.markSynced(op.id);
+        } else {
+          await db.syncQueueDao.incrementAttempts(op.id);
+        }
+      }
     }
   }
 }

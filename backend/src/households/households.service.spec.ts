@@ -39,6 +39,7 @@ describe('HouseholdsService', () => {
         deleteMany: jest.fn(),
       },
       monthSnapshot: { deleteMany: jest.fn() },
+      syncTombstone: { deleteMany: jest.fn() },
       budget: { deleteMany: jest.fn() },
       entry: { deleteMany: jest.fn() },
       account: { deleteMany: jest.fn() },

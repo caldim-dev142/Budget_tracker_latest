@@ -56,7 +56,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -66,7 +66,9 @@ class AppDatabase extends _$AppDatabase {
         try {
           await customStatement('PRAGMA foreign_keys = ON');
         } catch (_) {}
-        await _seedDefaultUsers();
+        // Fresh install: seed system categories for the offline 'local' household.
+        // Regular categories (141 entries) are seeded by AppInitService.seed() in main.dart.
+        await ensureSystemCategoriesForHousehold('local');
       },
       onUpgrade: (m, from, to) async {
         if (from < 2) {
@@ -83,8 +85,23 @@ class AppDatabase extends _$AppDatabase {
             await customStatement('ALTER TABLE planned_bills ADD COLUMN entry_id TEXT');
           } catch (_) {}
         }
-        await _seedDefaultUsers();
-        await _seedSystemCategories();
+        if (from < 4) {
+          // Schema v4: create annual_targets table (was missing from prior migrations)
+          try {
+            await customStatement('''
+              CREATE TABLE IF NOT EXISTS "annual_targets" (
+                "id" TEXT NOT NULL PRIMARY KEY,
+                "household_id" TEXT NOT NULL,
+                "title" TEXT NOT NULL,
+                "target_paise" INTEGER NOT NULL,
+                "type" TEXT NOT NULL DEFAULT 'income'
+              );
+            ''');
+          } catch (_) {}
+        }
+        // Ensure 'local' bootstrap household has its system categories after any upgrade.
+        // Auth household system cats are seeded by ensureUserHouseholdSeed() on login.
+        await ensureSystemCategoriesForHousehold('local');
       },
       beforeOpen: (details) async {
         try {
@@ -100,63 +117,62 @@ class AppDatabase extends _$AppDatabase {
             );
           ''');
         } catch (_) {}
-        await _seedDefaultUsers();
-        await _seedSystemCategories();
+        // Always ensure 'local' bootstrap system categories exist.
+        await ensureSystemCategoriesForHousehold('local');
       },
     );
   }
 
-  Future<void> _seedDefaultUsers() async {
-    // Hardcoded credentials removed for production security.
-    // User accounts are created dynamically via registration or Google Sign-In.
-  }
 
-  /// Seed the two system categories used for borrow/lending transaction sync
-  /// AND sync any unlinked receivables or planned bills.
-  /// These are idempotent — safe to call multiple times.
-  Future<void> _seedSystemCategories() async {
-    const households = ['hsh-admin', 'local-household', 'local'];
-    for (final hh in households) {
+  /// Ensures all 4 system categories exist for the given household.
+  /// Called after login so dynamic householdIds are handled correctly.
+  Future<void> ensureSystemCategoriesForHousehold(String householdId) async {
+    final sysCats = [
+      CategoriesTableCompanion.insert(
+        id: 'lend-system-cat-$householdId',
+        householdId: householdId,
+        kind: 'adjustment',
+        name: 'Money Lent Out',
+        isDeduction: const Value(true),
+        isSystem: const Value(true),
+        sortOrder: const Value(9990),
+      ),
+      CategoriesTableCompanion.insert(
+        id: 'borrow-system-cat-$householdId',
+        householdId: householdId,
+        kind: 'adjustment',
+        name: 'Borrowed Money',
+        isDeduction: const Value(false),
+        isSystem: const Value(true),
+        sortOrder: const Value(9991),
+      ),
+      CategoriesTableCompanion.insert(
+        id: 'bill-pay-system-cat-$householdId',
+        householdId: householdId,
+        kind: 'spending',
+        name: 'Bill Payment',
+        isDeduction: const Value(false),
+        isSystem: const Value(true),
+        sortOrder: const Value(9992),
+      ),
+      CategoriesTableCompanion.insert(
+        id: 'return-received-system-cat-$householdId',
+        householdId: householdId,
+        kind: 'adjustment',
+        name: 'Money Returned Back',
+        isDeduction: const Value(false),
+        isSystem: const Value(true),
+        sortOrder: const Value(9993),
+      ),
+    ];
+    for (final cat in sysCats) {
       try {
-        final existing = await (select(categoriesTable)
-              ..where((c) => c.id.equals('lend-system-cat-$hh')))
-            .getSingleOrNull();
-        if (existing == null) {
-          await into(categoriesTable).insert(
-            CategoriesTableCompanion.insert(
-              id: 'lend-system-cat-$hh',
-              householdId: hh,
-              kind: 'adjustment',
-              name: 'Money Lent Out',
-              isDeduction: const Value(true),
-              isSystem: const Value(true),
-              sortOrder: const Value(9990),
-            ),
-          );
-        }
-      } catch (_) {}
-      try {
-        final existing2 = await (select(categoriesTable)
-              ..where((c) => c.id.equals('borrow-system-cat-$hh')))
-            .getSingleOrNull();
-        if (existing2 == null) {
-          await into(categoriesTable).insert(
-            CategoriesTableCompanion.insert(
-              id: 'borrow-system-cat-$hh',
-              householdId: hh,
-              kind: 'adjustment',
-              name: 'Borrowed Money',
-              isDeduction: const Value(false),
-              isSystem: const Value(true),
-              sortOrder: const Value(9991),
-            ),
-          );
-        }
-      } catch (_) {}
-      try {
-        await borrowLendDao.syncUnlinkedRecords(hh);
+        await into(categoriesTable).insertOnConflictUpdate(cat);
       } catch (_) {}
     }
+    try {
+      await borrowLendDao.syncUnlinkedRecords(householdId);
+    } catch (_) {}
   }
 
   /// Open database cross-platform.

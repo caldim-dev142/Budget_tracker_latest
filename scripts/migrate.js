@@ -3,8 +3,12 @@ const fs = require('fs');
 const path = require('path');
 
 async function migrate() {
-  const connectionString = 'postgresql://postgres:Vimalvimal@666@db.ipfqnaqihgsqbbatayks.supabase.co:5432/postgres';
-  
+  // Credentials are read from the environment only — never commit a connection string.
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    console.error('DATABASE_URL environment variable is required.');
+    process.exit(1);
+  }
   const client = new Client({
     connectionString,
   });
