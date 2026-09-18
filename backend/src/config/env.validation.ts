@@ -55,4 +55,25 @@ export const envValidationSchema = Joi.object({
   CORS_ORIGINS: Joi.string().default('http://localhost:3000'),
   REDIS_URL: Joi.string().optional(),
   SENTRY_DSN: Joi.string().optional(),
+
+  // ─── Security switches (each independent — see main.ts) ─────────────────────
+  // Opt-in wildcard CORS for LAN development. Ignored in production.
+  CORS_ALLOW_ALL: Joi.string().valid('true', 'false').default('false'),
+  // Explicit Swagger switch; defaults to on outside production, off in production.
+  ENABLE_SWAGGER: Joi.string().valid('true', 'false').optional(),
+  // Set true ONLY when running behind a reverse proxy you control, so the
+  // throttler reads the real client IP from X-Forwarded-For.
+  TRUST_PROXY: Joi.string().valid('true', 'false').default('false'),
+
+  // ─── Firebase / Google Sign-In ──────────────────────────────────────────────
+  // Optional so local development without Google Sign-In still boots, but the
+  // auth service fails closed at verification time when they are absent.
+  FIREBASE_PROJECT_ID: Joi.string().optional(),
+  FIREBASE_CLIENT_EMAIL: Joi.string().optional(),
+  FIREBASE_PRIVATE_KEY: Joi.string().optional(),
+
+  // Comma-separated OAuth client IDs accepted by the direct-Google ID token
+  // fallback. When empty, that fallback is disabled entirely (fail closed) —
+  // never verify a Google ID token without pinning its audience.
+  GOOGLE_OAUTH_CLIENT_IDS: Joi.string().optional().allow(''),
 });

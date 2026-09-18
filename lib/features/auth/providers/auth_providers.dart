@@ -16,9 +16,53 @@ import '../../../core/services/sync_service.dart';
 const String kBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
 const String kDefaultServerUrl = 'http://192.168.1.166:3001';
 
+/// Loopback / emulator hosts that may still be reached over plain HTTP.
+///
+/// These are unreachable from a real user's device, so permitting cleartext to
+/// them keeps local development working without weakening release builds.
+bool isLoopbackHost(String host) =>
+    host == 'localhost' ||
+    host == '127.0.0.1' ||
+    host == '::1' ||
+    host == '10.0.2.2';
+
+/// Blocks plaintext HTTP requests in release builds.
+///
+/// SECURITY: Android's `networkSecurityConfig` / `usesCleartextTraffic` do NOT
+/// apply to Flutter's `dart:io` HttpClient — see flutter/flutter#106678, closed
+/// as "not planned". Dio therefore bypasses the manifest entirely, and without
+/// this interceptor bearer tokens and financial data would still travel in
+/// cleartext despite the Android config forbidding it. Enforcement has to live
+/// in Dart.
+Interceptor buildHttpsOnlyInterceptor() {
+  return InterceptorsWrapper(
+    onRequest: (options, handler) {
+      final uri = options.uri;
+      if (kReleaseMode && uri.scheme != 'https' && !isLoopbackHost(uri.host)) {
+        return handler.reject(
+          DioException(
+            requestOptions: options,
+            type: DioExceptionType.badCertificate,
+            error:
+                'Refusing to send data over an insecure HTTP connection to '
+                '${uri.host}. The server URL must use https://.',
+          ),
+        );
+      }
+      return handler.next(options);
+    },
+  );
+}
+
 final serverUrlProvider = StateProvider<String>((_) {
   if (kBackendUrl.isNotEmpty) {
     return kBackendUrl;
+  }
+  // SECURITY: never default a release build to a developer LAN address over
+  // plain HTTP. Release builds must be given BACKEND_URL at compile time:
+  //   flutter build appbundle --dart-define=BACKEND_URL=https://api.example.com
+  if (kReleaseMode) {
+    return '';
   }
   return kDefaultServerUrl;
 });
@@ -90,6 +134,8 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
   );
 
   AuthStateNotifier(this._ref) : super(const AsyncValue.data(AuthState())) {
+    // Must be first: reject insecure requests before any token is attached.
+    _dio.interceptors.add(buildHttpsOnlyInterceptor());
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
@@ -151,7 +197,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
           sendTimeout: const Duration(seconds: 8),
           contentType: 'application/json',
         ),
-      );
+      )..interceptors.add(buildHttpsOnlyInterceptor());
 
       final res = await refreshDio.post(
         '$serverUrl/auth/refresh',
@@ -195,7 +241,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     final currentAuth = state.valueOrNull;
     if (currentAuth != null && currentAuth.isAuthenticated) {
       debugPrint('Session expired — logging out user cleanly.');
-      await logout();
+      // Session expiry is NOT an account switch: the same user will sign back
+      // in. Only drop the session — never wipe their data, which would leave
+      // them staring at an empty app (and lose anything the server lacks).
+      await _signOutSession();
     }
   }
 
@@ -278,7 +327,7 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
           connectTimeout: const Duration(seconds: 4),
           receiveTimeout: const Duration(seconds: 4),
         ),
-      );
+      )..interceptors.add(buildHttpsOnlyInterceptor());
       final res = await dio.get('$targetUrl/auth/health');
       if (res.statusCode == 200 && res.data != null) {
         return (
@@ -873,21 +922,27 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     }
   }
 
-  /// Join an existing household using household ID
-  Future<void> joinHousehold(String householdId) async {
-    final trimmedId = householdId.trim();
-    if (trimmedId.isEmpty) {
-      throw Exception('Please enter a valid Household ID.');
+  /// Join an existing household by redeeming a single-use invite code.
+  ///
+  /// The server resolves the code to a household — the raw household UUID is
+  /// never sent by the client (it would be a security hole: the ID is visible
+  /// in the UI, so anyone who saw it could join without an invite).
+  Future<void> joinHousehold(String inviteCode) async {
+    final trimmedCode = inviteCode.trim().toUpperCase();
+    if (trimmedCode.isEmpty || trimmedCode.length != 8) {
+      throw Exception('Please enter a valid 8-character invite code.');
     }
 
     try {
       final serverUrl = _ref.read(serverUrlProvider);
       final res = await _dio.post(
         '$serverUrl/households/join',
-        data: {'householdId': trimmedId},
+        data: {'inviteCode': trimmedCode},
       );
       final data = res.data;
       final tokens = data['tokens'];
+      // The server resolves the invite code to the actual household ID.
+      final resolvedHouseholdId = (data['household']?['id'] as String?) ?? '';
 
       if (tokens != null && tokens['accessToken'] != null) {
         await SecureStore.writeAccessToken(tokens['accessToken']);
@@ -897,21 +952,25 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
           await SecureStore.writeRefreshTokenFamily(fam.toString());
         }
       }
-      await SecureStore.write('auth_household_id', trimmedId);
+      if (resolvedHouseholdId.isNotEmpty) {
+        await SecureStore.write('auth_household_id', resolvedHouseholdId);
+      }
 
       // Seed Drift database for this joined household
       final db = _ref.read(appDatabaseProvider);
-      await AppInitService.ensureUserHouseholdSeed(db, trimmedId);
+      if (resolvedHouseholdId.isNotEmpty) {
+        await AppInitService.ensureUserHouseholdSeed(db, resolvedHouseholdId);
+      }
 
       // Update local user in Drift table
       final currentAuth = state.valueOrNull;
-      if (currentAuth?.userId != null) {
+      if (currentAuth?.userId != null && resolvedHouseholdId.isNotEmpty) {
         await (db.update(db.usersTable)..where((u) => u.id.equals(currentAuth!.userId!)))
-            .write(UsersTableCompanion(householdId: Value(trimmedId)));
+            .write(UsersTableCompanion(householdId: Value(resolvedHouseholdId)));
       }
 
-      if (state.valueOrNull != null) {
-        state = AsyncValue.data(state.value!.copyWith(householdId: trimmedId));
+      if (state.valueOrNull != null && resolvedHouseholdId.isNotEmpty) {
+        state = AsyncValue.data(state.value!.copyWith(householdId: resolvedHouseholdId));
       }
 
       Future.microtask(() async {
@@ -919,6 +978,28 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       });
     } catch (e) {
       debugPrint('joinHousehold error: $e');
+      if (e is DioException && e.response?.data != null) {
+        final msg = e.response?.data['message'];
+        if (msg != null) throw Exception(msg.toString());
+      }
+      rethrow;
+    }
+  }
+
+  /// Generate a single-use invite code for the current household.
+  /// Only works if the current user is the household owner.
+  /// Returns `{ code: String, expiresAt: String }` on success.
+  Future<Map<String, dynamic>> generateHouseholdInvite() async {
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      final res = await _dio.post('$serverUrl/households/invite');
+      final data = res.data as Map<String, dynamic>;
+      return {
+        'code': data['code'] as String,
+        'expiresAt': data['expiresAt'] as String,
+      };
+    } catch (e) {
+      debugPrint('generateHouseholdInvite error: $e');
       if (e is DioException && e.response?.data != null) {
         final msg = e.response?.data['message'];
         if (msg != null) throw Exception(msg.toString());
@@ -995,7 +1076,48 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     }
   }
 
-  Future<void> logout() async {
+  /// Signs the user out and clears their data from this device.
+  ///
+  /// Returns the number of changes that could NOT be pushed to the server. A
+  /// non-zero result means local data was deliberately KEPT rather than wiped,
+  /// so the caller should tell the user their changes are still only on this
+  /// phone. Pass [force] to wipe anyway once the user has accepted that loss.
+  ///
+  /// Sign-out itself always completes — only the local wipe is conditional.
+  Future<int> logout({bool force = false}) async {
+    final db = _ref.read(appDatabaseProvider);
+
+    // 1. Best-effort push of anything still queued, so logging out never
+    //    silently discards work. Failures here are expected when offline.
+    try {
+      await _ref.read(syncServiceProvider).syncAllQueue();
+    } catch (_) {}
+
+    // 2. Ask the queue — not the sync call's return value — whether everything
+    //    actually landed. syncAllQueue() returns 0 both when there was nothing
+    //    to do and when the push failed, so it cannot be trusted as proof.
+    int stillPending = 0;
+    try {
+      stillPending = await db.syncQueueDao.pendingCount();
+    } catch (_) {
+      // If we cannot even read the queue, assume the worst and keep the data.
+      stillPending = force ? 0 : 1;
+    }
+
+    await _signOutSession();
+
+    if (stillPending > 0 && !force) {
+      // Keep local data: wiping now would destroy changes the server never got.
+      return stillPending;
+    }
+
+    await AppInitService.clearAllUserData(db);
+    return 0;
+  }
+
+  /// Revokes the server session and clears credentials, without touching
+  /// locally-stored financial data.
+  Future<void> _signOutSession() async {
     try {
       final serverUrl = _ref.read(serverUrlProvider);
       // The server revokes refresh tokens by session family (DEF-AUTH-02).
@@ -1027,8 +1149,8 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     await SecureStore.delete('app_lock_enabled');
     _ref.read(appLockEnabledProvider.notifier).state = false;
     _ref.read(appUnlockedProvider.notifier).state = false;
-    final db = _ref.read(appDatabaseProvider);
-    await AppInitService.clearAllDummyData(db);
+    // NOTE: financial data is deliberately NOT cleared here. logout() owns that
+    // decision, and only wipes once pending changes have reached the server.
     _ref.read(tokenProvider.notifier).state = null;
     state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
   }
@@ -1086,8 +1208,10 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     await SecureStore.delete('app_lock_enabled');
     _ref.read(appLockEnabledProvider.notifier).state = false;
     _ref.read(appUnlockedProvider.notifier).state = false;
+    // The account is gone server-side, so every local trace of it must go too.
+    // No sync check here: there is nothing left to sync to.
     final db = _ref.read(appDatabaseProvider);
-    await AppInitService.clearAllDummyData(db);
+    await AppInitService.clearAllUserData(db);
     _ref.read(tokenProvider.notifier).state = null;
     state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
   }

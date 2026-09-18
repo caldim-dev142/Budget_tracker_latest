@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -303,10 +304,7 @@ class SettingsScreen extends ConsumerWidget {
               children: [
                 PressableScale(
                   borderRadius: BorderRadius.circular(18),
-                  onTap: () async {
-                    await ref.read(authStateNotifierProvider.notifier).logout();
-                    if (context.mounted) context.go('/auth/login');
-                  },
+                  onTap: () => _handleSignOut(context, ref),
                   child: ListTile(
                     leading: Icon(Icons.logout_rounded, color: cs.error),
                     title: Text(
@@ -908,12 +906,6 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Future<void> _forceSync(BuildContext context, WidgetRef ref) async {
-    final authState = ref.read(authStateProvider).valueOrNull;
-    if (authState == null || authState.authMode != AuthMode.authenticated) {
-      AppFeedback.showWarning(context, 'You are not signed in. Please sign in or register to sync with cloud.');
-      return;
-    }
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -921,13 +913,13 @@ class SettingsScreen extends ConsumerWidget {
     );
 
     try {
-      final count = await ref.read(syncServiceProvider).syncAllQueue(throwOnError: true);
+      final count = await ref.read(syncServiceProvider).syncAllQueue();
       if (context.mounted) {
         Navigator.pop(context); // Pop loading spinner
         if (count > 0) {
           AppFeedback.showSuccess(context, 'Force sync completed! Synced $count changes.');
         } else {
-          AppFeedback.showInfo(context, 'Already up to date. All local data is synced.');
+          AppFeedback.showInfo(context, 'Already up to date. No pending changes to sync.');
         }
       }
     } catch (e) {
@@ -936,6 +928,72 @@ class SettingsScreen extends ConsumerWidget {
         AppFeedback.showError(context, 'Sync failed', error: e);
       }
     }
+  }
+
+  /// Signs out, clearing this device's data only once the server has the
+  /// user's changes.
+  ///
+  /// logout() pushes pending work first and returns how much could NOT be
+  /// delivered. When that is non-zero it deliberately keeps the local data
+  /// rather than destroying unsynced changes, and we ask the user what to do.
+  Future<void> _handleSignOut(BuildContext context, WidgetRef ref) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    int unsynced;
+    try {
+      unsynced = await ref.read(authStateNotifierProvider.notifier).logout();
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      AppFeedback.showError(context, 'Sign out failed', error: e);
+      return;
+    }
+
+    if (!context.mounted) return;
+    Navigator.pop(context); // dismiss spinner
+
+    if (unsynced == 0) {
+      context.go('/auth/login');
+      return;
+    }
+
+    // Signed out, but this device still holds changes the server never received.
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Unsynced changes'),
+        content: Text(
+          '$unsynced change${unsynced == 1 ? '' : 's'} could not be sent to the '
+          'server, so they exist only on this phone.\n\n'
+          'They have been kept. Sign in again with the same account while '
+          'connected to upload them.\n\n'
+          'Removing them now deletes them permanently.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Keep on this device'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(dialogCtx).colorScheme.error,
+            ),
+            child: const Text('Delete anyway'),
+          ),
+        ],
+      ),
+    );
+
+    if (discard == true) {
+      await ref.read(authStateNotifierProvider.notifier).logout(force: true);
+    }
+
+    if (context.mounted) context.go('/auth/login');
   }
 
   void _showServerUrlDialog(BuildContext context, WidgetRef ref) {
@@ -969,6 +1027,18 @@ class SettingsScreen extends ConsumerWidget {
               if (!url.startsWith('http://') && !url.startsWith('https://')) {
                 AppFeedback.showWarning(context, 'Server URL must start with http:// or https://');
                 return;
+              }
+              // SECURITY: release builds must not talk to a plaintext endpoint.
+              // Loopback/emulator hosts stay permitted so local debugging works.
+              if (kReleaseMode && url.startsWith('http://')) {
+                final host = Uri.tryParse(url)?.host ?? '';
+                if (!isLoopbackHost(host)) {
+                  AppFeedback.showWarning(
+                    context,
+                    'Server URL must use https:// — plain HTTP is not allowed.',
+                  );
+                  return;
+                }
               }
               ref.read(serverUrlProvider.notifier).state = url;
               Navigator.pop(context);
@@ -1250,7 +1320,7 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
   }
 
   Future<void> _handleJoinHousehold() async {
-    final idCtrl = TextEditingController();
+    final codeCtrl = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1261,22 +1331,24 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Enter the household ID shared by your family owner to join their household.',
+              'Enter the 8-character invite code provided by your family\'s household owner.',
               style: TextStyle(fontSize: 13, color: Colors.grey),
             ),
             const SizedBox(height: 16),
             TextField(
-              controller: idCtrl,
+              controller: codeCtrl,
+              textCapitalization: TextCapitalization.characters,
+              maxLength: 8,
               decoration: InputDecoration(
-                labelText: 'Household ID *',
-                hintText: 'e.g. hh-12345678',
+                labelText: 'Invite Code *',
+                hintText: 'e.g. 7K2P9XQ4',
                 border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.paste_rounded),
                   onPressed: () async {
                     final data = await Clipboard.getData(Clipboard.kTextPlain);
                     if (data?.text != null) {
-                      idCtrl.text = data!.text!.trim();
+                      codeCtrl.text = data!.text!.trim().toUpperCase();
                     }
                   },
                 ),
@@ -1298,15 +1370,15 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
     );
 
     if (confirmed == true && mounted) {
-      final inputId = idCtrl.text.trim();
-      if (inputId.isEmpty) {
-        AppFeedback.showWarning(context, 'Please enter a valid Household ID.');
+      final inputCode = codeCtrl.text.trim().toUpperCase();
+      if (inputCode.isEmpty || inputCode.length != 8) {
+        AppFeedback.showWarning(context, 'Please enter a valid 8-character invite code.');
         return;
       }
       try {
         await widget.ref
             .read(authStateNotifierProvider.notifier)
-            .joinHousehold(inputId);
+            .joinHousehold(inputCode);
         if (mounted) {
           AppFeedback.showSuccess(context, 'Successfully joined household!');
           _loadHousehold();
@@ -1318,6 +1390,93 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
       }
     }
   }
+
+  /// Owner-only: request a fresh invite code from the server and display it.
+  Future<void> _handleGenerateInvite() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final result = await widget.ref
+          .read(authStateNotifierProvider.notifier)
+          .generateHouseholdInvite();
+
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+
+      final code = result['code'] as String? ?? '';
+      final expiresAtRaw = result['expiresAt'] as String? ?? '';
+      String expiryLabel = expiresAtRaw;
+      try {
+        final dt = DateTime.parse(expiresAtRaw).toLocal();
+        final h = dt.hour.toString().padLeft(2, '0');
+        final m = dt.minute.toString().padLeft(2, '0');
+        expiryLabel = '${dt.day}/${dt.month}/${dt.year} at $h:$m';
+      } catch (_) {}
+
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Invite Code Generated'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Share this code with the person you want to add. It can only be used once and expires in 24 hours.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  code,
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 6,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Expires: $expiryLabel',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton.icon(
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('Copy Code'),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: code));
+                AppFeedback.showInfo(context, 'Invite code copied to clipboard!');
+              },
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+      AppFeedback.showError(context, 'Failed to generate invite code', error: e);
+    }
+  }
+
 
   Future<void> _handleUpdateName(String currentName) async {
     final ctrl = TextEditingController(text: currentName);
@@ -1591,6 +1750,25 @@ class _ManageHouseholdDialogState extends State<_ManageHouseholdDialog> {
                                   ],
                                 ),
                               ),
+
+                              const SizedBox(height: 12),
+                              // Owner-only: Generate invite code button
+                              if (isOwner)
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    icon: const Icon(Icons.link_rounded, size: 18),
+                                    label: const Text(
+                                      'Generate Invite Code',
+                                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    ),
+                                    onPressed: _handleGenerateInvite,
+                                  ),
+                                ),
 
                               const SizedBox(height: 16),
                               // Members Section

@@ -63,7 +63,7 @@ export class SyncService {
   constructor(
     private readonly entriesService: EntriesService,
     @Inject('PRISMA') private readonly prisma: PrismaClient,
-  ) {}
+  ) { }
 
   /**
    * Idempotent batch synchronization (POST /sync/batch).
@@ -91,27 +91,20 @@ export class SyncService {
 
     // 0. Categories (Sync first so entries satisfy foreign key constraints)
     if (dto.categories && dto.categories.length > 0) {
-      const validCats = dto.categories.filter(
-        (c) => !tombstones.has(tombKey('category', c.id)) && !isClientSystemCategoryId(c.id, householdId),
-      );
-
-      if (validCats.length > 0) {
-        const existingCats = await this.prisma.category.findMany({
-          where: { id: { in: validCats.map((c) => c.id) } },
-          select: { id: true, householdId: true },
-        });
-        const existingMap = new Map(existingCats.map((c) => [c.id, c.householdId]));
-
-        for (const c of existingCats) {
-          if (c.householdId !== householdId) {
-            throw new ForbiddenException(`Category ${c.id} belongs to a different household.`);
+      for (const cat of dto.categories) {
+        if (tombstones.has(tombKey('category', cat.id))) continue;
+        // Flutter-local system category ids map to the canonical '{householdId}-*-system-cat' rows seeded server-side.
+        if (isClientSystemCategoryId(cat.id, householdId)) continue;
+        try {
+          // Guard: verify existing category belongs to the authenticated household
+          const existingCat = await this.prisma.category.findUnique({ where: { id: cat.id } });
+          if (existingCat && existingCat.householdId !== householdId) {
+            throw new ForbiddenException(`Category ${cat.id} belongs to a different household.`);
           }
-        }
 
-        const toCreate = validCats.filter((c) => !existingMap.has(c.id));
-        if (toCreate.length > 0) {
-          await this.prisma.category.createMany({
-            data: toCreate.map((cat) => ({
+          await this.prisma.category.upsert({
+            where: { id: cat.id },
+            create: {
               id: cat.id,
               householdId,
               kind: cat.kind,
@@ -121,11 +114,21 @@ export class SyncService {
               isDeduction: cat.isDeduction ?? false,
               isSystem: cat.isSystem ?? false,
               sortOrder: cat.sortOrder ?? 0,
-            })),
-            skipDuplicates: true,
+            },
+            update: {
+              kind: cat.kind,
+              groupCode: cat.groupCode ?? null,
+              name: cat.name,
+              needOrWant: cat.needOrWant ?? null,
+              isDeduction: cat.isDeduction ?? false,
+              isSystem: cat.isSystem ?? false,
+              sortOrder: cat.sortOrder ?? 0,
+            },
           });
+          categoriesSynced++;
+        } catch (e) {
+          console.error(`Failed to sync category ${cat.id}:`, e);
         }
-        categoriesSynced = validCats.length;
       }
     }
 
@@ -233,7 +236,7 @@ export class SyncService {
                 previousOutstandingPaise: 0,
                 isActive: true,
               },
-            }).catch(() => {});
+            }).catch(() => { });
           }
 
           await this.prisma.cardTransaction.upsert({

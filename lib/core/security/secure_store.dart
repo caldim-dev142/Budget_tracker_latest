@@ -45,19 +45,33 @@ class SecureStore {
   // ── Local DB encryption key (SQLCipher) ────────────────────────────────────
   /// Returns the DB key, generating and persisting a 256-bit random key on first
   /// run. Pass this to the SQLCipher PRAGMA when opening the database.
+  /// SECURITY: this method FAILS CLOSED. It previously returned the hardcoded
+  /// constant 'budget_tracker_secure_fallback_key' whenever Keystore access
+  /// threw — and `resetOnError: true` makes that path genuinely reachable. A
+  /// known, committed key is equivalent to no encryption at all, and it would
+  /// also silently re-encrypt the database under a key an attacker knows.
+  /// Refusing to open is strictly safer than opening with a public key.
   static Future<String> getOrCreateDbKey() async {
-    try {
-      final existing = await read(_kDbKey);
-      if (existing != null && existing.isNotEmpty) return existing;
-      final rng = Random.secure();
-      final bytes = List<int>.generate(32, (_) => rng.nextInt(256));
-      final key = base64UrlEncode(bytes);
-      await write(_kDbKey, key);
-      return key;
-    } catch (_) {
-      // Safe fallback key to ensure database initialization never crashes the application
-      return 'budget_tracker_secure_fallback_key';
+    final existing = await read(_kDbKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final rng = Random.secure();
+    final bytes = List<int>.generate(32, (_) => rng.nextInt(256));
+    final key = base64UrlEncode(bytes);
+    await write(_kDbKey, key);
+
+    // Read back: if the key did not persist, the next launch would generate a
+    // different one and the database would be permanently unreadable. Better to
+    // surface that now than to write data that can never be decrypted again.
+    final verify = await read(_kDbKey);
+    if (verify != key) {
+      throw StateError(
+        'Could not persist the local database encryption key to secure storage. '
+        'Refusing to continue: data written now could not be decrypted later.',
+      );
     }
+
+    return key;
   }
 
   // ── Generic key-value helpers ────────────────────────────────────────────────

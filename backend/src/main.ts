@@ -15,7 +15,18 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: process.env.NODE_ENV === 'development' }),
+    new FastifyAdapter({
+      logger: process.env.NODE_ENV === 'development',
+      // SECURITY: behind a reverse proxy (Nginx, a tunnel, a load balancer)
+      // every request arrives from the proxy's IP, so rate limiting would
+      // become a single global bucket instead of per-client. trustProxy makes
+      // Fastify read the real client IP from X-Forwarded-For.
+      //
+      // Only enable it when actually behind a proxy you control — trusting the
+      // header on a directly-exposed server lets anyone spoof their IP and
+      // sidestep the throttler entirely.
+      trustProxy: process.env.TRUST_PROXY === 'true',
+    }),
     // Body parsers are registered explicitly below (Nest's automatic JSON parser would collide
     // with the empty-body-tolerant parser and abort bootstrap with FST_ERR_CTP_ALREADY_PRESENT).
     { bodyParser: false },
@@ -81,6 +92,19 @@ async function bootstrap() {
     reply.header('X-XSS-Protection', '1; mode=block');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
 
+    // This is a JSON API: nothing should ever be rendered, framed or embedded.
+    reply.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+    reply.header('Cross-Origin-Resource-Policy', 'same-origin');
+    reply.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    // Don't advertise the framework/version to attackers.
+    reply.removeHeader('X-Powered-By');
+
+    // HSTS only over TLS — sending it on plaintext dev traffic would pin
+    // localhost to https:// in the browser and break local development.
+    if (request.protocol === 'https') {
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+
     // Default missing content-type on requests so Fastify doesn't reject with 415 Unsupported Media Type: undefined
     if (!request.headers['content-type']) {
       request.headers['content-type'] = 'application/json';
@@ -97,19 +121,41 @@ async function bootstrap() {
   });
 
   // CORS — permissive in development (LAN mobile/web clients), restricted in production.
-  // Set CORS_ORIGINS env var to a comma-separated list of allowed origins for production.
+  //
+  // SECURITY: this used to be gated on NODE_ENV alone, together with Swagger
+  // exposure and verbose error messages. A deployment that forgot to set
+  // NODE_ENV=production therefore got wildcard-CORS-with-credentials, public
+  // API docs and leaked internal error text all at once. Each concern now has
+  // its own explicit switch, so one missed variable cannot open all three.
   const corsOrigins = process.env.CORS_ORIGINS;
   const isProduction = process.env.NODE_ENV === 'production';
 
+  // Opt-IN, and only outside production: wildcard CORS never activates by
+  // omission. Set CORS_ALLOW_ALL=true for LAN development.
+  const allowAllCors = !isProduction && process.env.CORS_ALLOW_ALL === 'true';
+
+  const allowedOrigins = corsOrigins
+    ? corsOrigins.split(',').map((o) => o.trim()).filter((o) => o.length > 0)
+    : [];
+
+  if (allowAllCors) {
+    console.warn(
+      '[SECURITY] CORS_ALLOW_ALL=true — every origin is permitted with credentials. ' +
+        'Development only; never set this in production.',
+    );
+  }
+
   app.enableCors({
-    origin: isProduction
-      ? (corsOrigins ? corsOrigins.split(',').map((o) => o.trim()) : false)
-      : true, // allow all origins in local/development for LAN mobile access
+    origin: allowAllCors ? true : allowedOrigins.length > 0 ? allowedOrigins : false,
     credentials: true,
   });
 
-  // Swagger API docs (dev only)
-  if (process.env.NODE_ENV !== 'production') {
+  // Swagger API docs — own switch, defaults to OFF in production.
+  const enableSwagger = process.env.ENABLE_SWAGGER
+    ? process.env.ENABLE_SWAGGER === 'true'
+    : !isProduction;
+
+  if (enableSwagger) {
     const config = new DocumentBuilder()
       .setTitle('Budget Tracker API')
       .setDescription('Personal/family budget tracker — INR, six-layer waterfall')
@@ -124,7 +170,7 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') ?? parseInt(process.env.PORT ?? '3001', 10);
   await app.listen(port, '0.0.0.0');
   console.log(`Budget Tracker API running on http://0.0.0.0:${port}`);
-  if (process.env.NODE_ENV !== 'production') {
+  if (enableSwagger) {
     console.log(`Swagger docs: http://localhost:${port}/api/docs`);
   }
 }

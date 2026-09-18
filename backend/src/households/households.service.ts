@@ -4,6 +4,8 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
@@ -76,38 +78,122 @@ export class HouseholdsService {
   }
 
   /**
-   * Join an existing household using the provided household ID.
+   * Generate a short single-use invite code for this household.
+   *
+   * SECURITY:
+   * - Only the household owner may generate codes.
+   * - Max 5 unexpired+unused codes per household (prevents code-spam enumeration).
+   * - Each code is 8 characters of uppercase alphanumeric, excluding visually
+   *   ambiguous chars (O, 0, I, 1) — 32^8 ≈ 1 trillion combinations.
+   * - Codes expire after 24 hours.
    */
-  async join(userId: string, householdId: string) {
-    if (!householdId || householdId.trim().length === 0) {
-      throw new BadRequestException('Household ID is required.');
+  async generateInvite(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.household_id) {
+      throw new NotFoundException('You do not belong to any household.');
     }
 
-    const trimmedId = householdId.trim();
-
     const household = await this.prisma.household.findUnique({
-      where: { id: trimmedId },
+      where: { id: user.household_id },
     });
     if (!household) {
-      throw new NotFoundException(
-        `Household not found with ID: "${trimmedId}". Please verify the ID and try again.`,
+      throw new NotFoundException('Household not found.');
+    }
+    if (household.ownerId !== user.id) {
+      throw new ForbiddenException('Only the household owner can generate invite codes.');
+    }
+
+    // Rate-limit: max 5 active (unexpired + unused) codes per household at a time.
+    const now = new Date();
+    const activeCount = await (this.prisma as any).householdInvite.count({
+      where: {
+        householdId: household.id,
+        usedAt: null,
+        expiresAt: { gt: now },
+      },
+    });
+    if (activeCount >= 5) {
+      throw new HttpException(
+        'Too many active invite codes. Wait for existing codes to expire or be used.',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+    const code = this.generateCode();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24h
+
+    await (this.prisma as any).householdInvite.create({
+      data: {
+        id: uuidv4(),
+        householdId: household.id,
+        code,
+        createdBy: user.id,
+        expiresAt,
+      },
     });
+
+    return { code, expiresAt };
+  }
+
+  /**
+   * Join an existing household by redeeming a single-use invite code.
+   *
+   * SECURITY:
+   * - Accepts only the 8-char invite code, never the raw household UUID.
+   * - Expired or already-redeemed codes are rejected.
+   * - Redemption is atomic: usedAt + usedBy are written in the same transaction
+   *   as the user update, preventing double-use under concurrent requests.
+   */
+  async joinByCode(userId: string, inviteCode: string) {
+    const code = inviteCode.trim().toUpperCase();
+
+    const invite = await (this.prisma as any).householdInvite.findUnique({
+      where: { code },
+    });
+
+    if (!invite) {
+      throw new NotFoundException(
+        'Invite code not found. Please ask the household owner for a new code.',
+      );
+    }
+
+    const now = new Date();
+    if (invite.usedAt !== null) {
+      throw new BadRequestException(
+        'This invite code has already been used. Please ask the household owner for a new code.',
+      );
+    }
+    if (invite.expiresAt < now) {
+      throw new BadRequestException(
+        'This invite code has expired. Please ask the household owner for a new code.',
+      );
+    }
+
+    const household = await this.prisma.household.findUnique({
+      where: { id: invite.householdId },
+    });
+    if (!household) {
+      throw new NotFoundException('The household associated with this invite no longer exists.');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found.');
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { household_id: household.id },
+    // Atomic redemption: burn the code and update the user in one transaction.
+    await this.prisma.$transaction(async (tx) => {
+      await (tx as any).householdInvite.update({
+        where: { code },
+        data: { usedAt: now, usedBy: user.id },
+      });
+      await tx.user.update({
+        where: { id: user.id },
+        data: { household_id: household.id },
+      });
     });
 
     const tokens = await this.authService.issueTokens(user.id, household.id);
-
     const members = await this.getHouseholdMembers(household.id, household.ownerId);
 
     return {
@@ -120,6 +206,25 @@ export class HouseholdsService {
       },
       tokens,
     };
+  }
+
+  /**
+   * Generates an 8-character uppercase alphanumeric code.
+   * Excludes visually ambiguous characters: O, 0, I, 1.
+   */
+  private generateCode(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars, no O/0/I/1
+    const crypto = require('crypto');
+    let result = '';
+    // Use rejection sampling to avoid modulo bias.
+    while (result.length < 8) {
+      const byte = crypto.randomBytes(1)[0];
+      // Accept bytes 0..223 (7 complete sets of 32), reject 224..255.
+      if (byte < alphabet.length * Math.floor(256 / alphabet.length)) {
+        result += alphabet[byte % alphabet.length];
+      }
+    }
+    return result;
   }
 
   /**

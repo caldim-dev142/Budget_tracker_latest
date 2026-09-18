@@ -17,6 +17,23 @@ model Household {
   @@map("households")
 }
 
+/// Invite codes issued by a household owner to allow a specific guest to join.
+/// Each code is single-use, time-limited to 24h, and distinct from the household UUID
+/// so that sharing the UI-visible household ID never grants access.
+model HouseholdInvite {
+  id          String    @id @default(uuid())
+  householdId String    @map("household_id")
+  code        String    @unique             // 8 uppercase alphanumeric chars, no ambiguous chars
+  createdBy   String    @map("created_by") // userId of the owner who generated this code
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt      DateTime? @map("used_at")    @db.Timestamptz(6) // null until redeemed
+  usedBy      String?   @map("used_by")   // userId who redeemed this code
+
+  @@index([householdId])
+  @@index([code])
+  @@map("household_invites")
+}
+
 model User {
   id            String         @id @default(uuid())
   email         String         @unique

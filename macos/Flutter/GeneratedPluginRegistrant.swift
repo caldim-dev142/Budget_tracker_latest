@@ -11,7 +11,7 @@ import firebase_core
 import flutter_secure_storage_macos
 import google_sign_in_ios
 import local_auth_darwin
-import sqlite3_flutter_libs
+import sqlcipher_flutter_libs
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   ConnectivityPlusPlugin.register(with: registry.registrar(forPlugin: "ConnectivityPlusPlugin"))

@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto, LogoutDto } from './dto/refresh-token.dto';
+import { GoogleSignInDto } from './dto/google-sign-in.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('auth')
@@ -34,8 +35,11 @@ export class AuthController {
   @Post('google')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate via Google ID token' })
-  googleSignIn(@Body() body: { idToken: string }) {
-    return this.authService.googleSignIn(body.idToken);
+  // Credential endpoint: throttle it like login rather than leaving it on the
+  // 100/min global default, which allows sustained token probing.
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  googleSignIn(@Body() dto: GoogleSignInDto) {
+    return this.authService.googleSignIn(dto.idToken);
   }
 
   @Post('login')
@@ -49,6 +53,9 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate refresh token' })
+  // Credential endpoint: a refresh token is a bearer secret, so this must not
+  // sit on the permissive global default.
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   refresh(@Body() body: RefreshTokenDto) {
     // The raw token is passed through; AuthService hashes it exactly once before lookup.
     return this.authService.refresh(body.userId, body.refreshToken, body.family);

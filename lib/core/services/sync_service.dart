@@ -124,31 +124,19 @@ class SyncService {
     }
   }
 
-  Future<int> syncAllQueue({bool throwOnError = false}) async {
+  Future<int> syncAllQueue() async {
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
-    if (serverUrl.isEmpty) {
-      if (throwOnError) throw Exception('Server URL is not configured. Please check backend URL in Settings.');
-      return 0;
-    }
-
-    if (authState == null || authState.authMode != AuthMode.authenticated) {
-      if (throwOnError) throw Exception('You are not signed in. Please sign in or register to sync data to the database.');
+    if (serverUrl.isEmpty || authState == null || authState.authMode != AuthMode.authenticated) {
       return 0;
     }
 
     final householdId = authState.householdId;
-    if (householdId == null || householdId.isEmpty) {
-      if (throwOnError) throw Exception('No active household found for your account. Please log in again.');
-      return 0;
-    }
+    if (householdId == null || householdId.isEmpty) return 0;
 
     final token = authState.token;
-    if (token == null) {
-      if (throwOnError) throw Exception('Session token is missing. Please log in again.');
-      return 0;
-    }
+    if (token == null) return 0;
 
     final db = _ref.read(appDatabaseProvider);
 
@@ -413,40 +401,26 @@ class SyncService {
       await _replayMonthStatusOps(db, serverUrl, token, householdId);
 
       // 5. AFTER pushing local data, pull any latest server-side changes to merge
-      final pulledCount = await pullFromServer(throwOnError: throwOnError);
+      await pullFromServer();
 
-      return successCount + allEntries.length + pulledCount;
+      return successCount + allEntries.length;
     } catch (e) {
       debugPrint('Error during comprehensive batch sync: $e');
-      if (throwOnError) {
-        if (e is DioException && e.response?.statusCode == 401) {
-          throw Exception('Session expired or account no longer exists in database. Please log out and sign in or register again.');
-        }
-        rethrow;
-      }
       return successCount;
     }
   }
 
   /// Pulls all household data from backend PostgreSQL into local SQLite (GET /sync/pull).
-  Future<int> pullFromServer({bool throwOnError = false}) async {
+  Future<bool> pullFromServer() async {
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
-    if (serverUrl.isEmpty) {
-      if (throwOnError) throw Exception('Backend Server URL is not configured. Please check Settings.');
-      return 0;
-    }
-    if (authState == null || authState.authMode != AuthMode.authenticated) {
-      if (throwOnError) throw Exception('You are not signed in. Please sign in to sync.');
-      return 0;
+    if (serverUrl.isEmpty || authState == null || authState.authMode != AuthMode.authenticated) {
+      return false;
     }
 
     final token = authState.token;
-    if (token == null) {
-      if (throwOnError) throw Exception('Session token is missing. Please log in again.');
-      return 0;
-    }
+    if (token == null) return false;
 
     final db = _ref.read(appDatabaseProvider);
     final householdId = authState.householdId ?? 'default';
@@ -462,9 +436,8 @@ class SyncService {
       );
 
       final data = res.data;
-      if (data == null || data is! Map) return 0;
+      if (data == null || data is! Map) return false;
       final unsentCloses = <String>[];
-      int pulledCount = 0;
 
       await db.transaction(() async {
         // 1. Categories
@@ -486,9 +459,7 @@ class SyncService {
 
         // 2. Accounts
         if (data['accounts'] != null && data['accounts'] is List) {
-          final list = data['accounts'] as List;
-          pulledCount += list.length;
-          for (final a in list) {
+          for (final a in data['accounts'] as List) {
             await db.accountDao.upsertAccount(AccountsTableCompanion.insert(
               id: a['id'] as String,
               householdId: (a['householdId'] ?? householdId) as String,
@@ -503,9 +474,7 @@ class SyncService {
 
         // 3. Credit Cards
         if (data['creditCards'] != null && data['creditCards'] is List) {
-          final list = data['creditCards'] as List;
-          pulledCount += list.length;
-          for (final c in list) {
+          for (final c in data['creditCards'] as List) {
             await db.into(db.creditCardsTable).insertOnConflictUpdate(CreditCardsTableCompanion.insert(
               id: c['id'] as String,
               householdId: (c['householdId'] ?? householdId) as String,
@@ -518,9 +487,7 @@ class SyncService {
 
         // 4. Card Transactions
         if (data['cardTransactions'] != null && data['cardTransactions'] is List) {
-          final list = data['cardTransactions'] as List;
-          pulledCount += list.length;
-          for (final t in list) {
+          for (final t in data['cardTransactions'] as List) {
             await db.into(db.cardTransactionsTable).insertOnConflictUpdate(CardTransactionsTableCompanion.insert(
               id: t['id'] as String,
               cardId: t['cardId'] as String,
@@ -592,9 +559,7 @@ class SyncService {
 
         // 9. Entries
         if (data['entries'] != null && data['entries'] is List) {
-          final list = data['entries'] as List;
-          pulledCount += list.length;
-          for (final e in list) {
+          for (final e in data['entries'] as List) {
             await db.entryDao.insertEntry(EntriesTableCompanion.insert(
               id: e['id'] as String,
               householdId: (e['householdId'] ?? householdId) as String,
@@ -795,18 +760,18 @@ class SyncService {
 
             if (status == 'closed' && local.status != 'closed') {
               await (db.update(db.monthSnapshotsTable)..where((t) => t.id.equals(local.id))).write(
-                MonthSnapshotsTableCompanion(
-                  status: const Value('closed'),
-                  closedAt: Value(changedAt ?? DateTime.now()),
-                ),
+                MonthSnapshotsTableCompanion(status: const Value('closed'), closedAt: Value(changedAt ?? DateTime.now())),
               );
-            } else if (status != 'closed' && local.status == 'closed') {
-              await (db.update(db.monthSnapshotsTable)..where((t) => t.id.equals(local.id))).write(
-                const MonthSnapshotsTableCompanion(
-                  status: Value('open'),
-                  closedAt: Value(null),
-                ),
-              );
+            } else if (status == 'open' && local.status == 'closed') {
+              if (changedAt != null) {
+                // Reopened on the server after this device's close was delivered.
+                await (db.update(db.monthSnapshotsTable)..where((t) => t.id.equals(local.id))).write(
+                  const MonthSnapshotsTableCompanion(status: Value('open'), closedAt: Value(null)),
+                );
+              } else {
+                // The server never recorded this close (older app version or a lost notification).
+                unsentCloses.add(ym);
+              }
             }
           }
         }
@@ -822,12 +787,11 @@ class SyncService {
         await _replayMonthStatusOps(db, serverUrl, token, householdId);
       }
 
-      debugPrint('Successfully pulled and synchronized all household data from server ($pulledCount items).');
-      return pulledCount;
+      debugPrint('Successfully pulled and synchronized all household data from server.');
+      return true;
     } catch (e) {
       debugPrint('Failed to pull data from server: $e');
-      if (throwOnError) rethrow;
-      return 0;
+      return false;
     }
   }
 

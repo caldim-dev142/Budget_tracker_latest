@@ -10,6 +10,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { HouseholdsService } from './households.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateHouseholdDto, JoinHouseholdDto, UpdateHouseholdDto } from './dto/household.dto';
@@ -27,10 +28,28 @@ export class HouseholdsController {
     return this.householdsService.create(req.user.userId, body.name);
   }
 
+  /**
+   * Generate a single-use invite code for this household.
+   * Only the household owner may call this endpoint.
+   * Rate-limited to 5 req/min to prevent code-generation abuse.
+   */
+  @Post('invite')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Generate a single-use invite code for the household (Owner only)' })
+  generateInvite(@Req() req: any) {
+    return this.householdsService.generateInvite(req.user.userId);
+  }
+
+  /**
+   * Join a household by redeeming a single-use invite code.
+   * The raw household UUID is no longer accepted — codes are resolved server-side.
+   * Rate-limited to 10 req/min to prevent brute-force code enumeration.
+   */
   @Post('join')
-  @ApiOperation({ summary: 'Join an existing household by household ID' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Join a household by redeeming a single-use invite code' })
   join(@Req() req: any, @Body() body: JoinHouseholdDto) {
-    return this.householdsService.join(req.user.userId, body.householdId);
+    return this.householdsService.joinByCode(req.user.userId, body.inviteCode);
   }
 
   @Get('me')

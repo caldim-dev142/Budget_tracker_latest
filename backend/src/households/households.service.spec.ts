@@ -11,7 +11,7 @@ jest.mock('firebase-admin/auth', () => ({
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { HouseholdsService } from './households.service';
 import { AuthService } from '../auth/auth.service';
 
@@ -51,6 +51,14 @@ describe('HouseholdsService', () => {
       reserveLine: { deleteMany: jest.fn() },
       annual_targets: { deleteMany: jest.fn() },
       $transaction: jest.fn((callback) => callback(prismaMock)),
+      // householdInvite — accessed via (prisma as any) since it requires
+      // client regeneration (blocked in dev by the running NestJS process).
+      householdInvite: {
+        count: jest.fn(),
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
     };
 
     authServiceMock = {
@@ -97,25 +105,60 @@ describe('HouseholdsService', () => {
     });
   });
 
-  describe('join', () => {
-    it('should throw NotFoundException if household ID is not found', async () => {
-      prismaMock.household.findUnique.mockResolvedValue(null);
-      await expect(service.join('usr-2', 'non-existent-id')).rejects.toThrow(NotFoundException);
+  describe('joinByCode', () => {
+    const household = { id: 'hsh-100', name: 'Existing Household', ownerId: 'usr-1' };
+    const user = { id: 'usr-2', email: 'member@test.com', displayName: 'Member' };
+    const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    it('should throw NotFoundException if invite code is not found', async () => {
+      prismaMock.householdInvite.findUnique.mockResolvedValue(null);
+      await expect(service.joinByCode('usr-2', 'BADCODE1')).rejects.toThrow(NotFoundException);
     });
 
-    it('should associate user with household and return members', async () => {
-      const household = { id: 'hsh-100', name: 'Existing Household', ownerId: 'usr-1' };
-      const user = { id: 'usr-2', email: 'member@test.com', displayName: 'Member' };
+    it('should throw BadRequestException if invite code is already used', async () => {
+      prismaMock.householdInvite.findUnique.mockResolvedValue({
+        code: 'USEDCODE',
+        householdId: 'hsh-100',
+        usedAt: new Date(),
+        expiresAt: futureDate,
+      });
+      await expect(service.joinByCode('usr-2', 'USEDCODE')).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException if invite code is expired', async () => {
+      prismaMock.householdInvite.findUnique.mockResolvedValue({
+        code: 'EXPRCODE',
+        householdId: 'hsh-100',
+        usedAt: null,
+        expiresAt: new Date(Date.now() - 1000), // 1 second in the past
+      });
+      await expect(service.joinByCode('usr-2', 'EXPRCODE')).rejects.toThrow(BadRequestException);
+    });
+
+    it('should associate user with household and burn the code atomically on valid invite', async () => {
+      prismaMock.householdInvite.findUnique.mockResolvedValue({
+        code: 'VALIDC0D',
+        householdId: 'hsh-100',
+        usedAt: null,
+        expiresAt: futureDate,
+      });
       prismaMock.household.findUnique.mockResolvedValue(household);
       prismaMock.user.findUnique.mockResolvedValue(user);
-      prismaMock.user.update.mockResolvedValue({ ...user, household_id: 'hsh-100' });
       prismaMock.user.findMany.mockResolvedValue([
         { id: 'usr-1', email: 'owner@test.com', displayName: 'Owner' },
         { id: 'usr-2', email: 'member@test.com', displayName: 'Member' },
       ]);
 
-      const result = await service.join('usr-2', 'hsh-100');
+      const result = await service.joinByCode('usr-2', 'VALIDC0D');
 
+      // Code must be burned (usedAt set) and user must be linked — both in transaction
+      expect(prismaMock.$transaction).toHaveBeenCalled();
+      expect(prismaMock.householdInvite.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { code: 'VALIDC0D' },
+          data: expect.objectContaining({ usedBy: 'usr-2' }),
+        }),
+      );
       expect(prismaMock.user.update).toHaveBeenCalledWith({
         where: { id: 'usr-2' },
         data: { household_id: 'hsh-100' },
@@ -124,6 +167,53 @@ describe('HouseholdsService', () => {
       expect(result.household.members.length).toBe(2);
       expect(result.household.members[0].role).toBe('owner');
       expect(result.household.members[1].role).toBe('member');
+    });
+  });
+
+  describe('generateInvite', () => {
+    const ownerUser = { id: 'usr-1', email: 'owner@test.com', household_id: 'hsh-1' };
+    const household = { id: 'hsh-1', name: 'My Household', ownerId: 'usr-1' };
+    const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    it('should throw NotFoundException if user has no household', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ id: 'usr-1', household_id: null });
+      await expect(service.generateInvite('usr-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ForbiddenException if user is not the household owner', async () => {
+      prismaMock.user.findUnique.mockResolvedValue({ id: 'usr-2', household_id: 'hsh-1' });
+      prismaMock.household.findUnique.mockResolvedValue(household); // ownerId is usr-1, not usr-2
+      await expect(service.generateInvite('usr-2')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should throw 429 if 5 or more active unexpired codes already exist', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(ownerUser);
+      prismaMock.household.findUnique.mockResolvedValue(household);
+      prismaMock.householdInvite.count.mockResolvedValue(5);
+
+      await expect(service.generateInvite('usr-1')).rejects.toThrow(
+        expect.objectContaining({ status: HttpStatus.TOO_MANY_REQUESTS }),
+      );
+    });
+
+    it('should generate and store an 8-char code for the owner', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(ownerUser);
+      prismaMock.household.findUnique.mockResolvedValue(household);
+      prismaMock.householdInvite.count.mockResolvedValue(0);
+      prismaMock.householdInvite.create.mockResolvedValue({});
+
+      const result = await service.generateInvite('usr-1');
+
+      expect(prismaMock.householdInvite.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            householdId: 'hsh-1',
+            createdBy: 'usr-1',
+          }),
+        }),
+      );
+      expect(result.code).toMatch(/^[A-Z2-9]{8}$/);
+      expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now());
     });
   });
 

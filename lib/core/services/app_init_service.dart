@@ -67,14 +67,13 @@ class AppInitService {
   }
 
   /// Safely migrates any offline/local entities to the authenticated householdId
-  /// Safely migrates any offline/local or orphaned local entities to the authenticated householdId
   static Future<void> migrateLocalDataToHousehold(AppDatabase db, String householdId) async {
     if (householdId.isEmpty || householdId == 'local') return;
     try {
       // DEF-FIN-09: guest entries/budgets reference 'local' category ids ('adj-05',
       // 'lend-system-cat-local'). Re-point them to the household's categories so deduction
       // flags (and category names) resolve after migration instead of defaulting to "add".
-      await _remapLocalCategoryReferences(db, householdId, 'local');
+      await _remapLocalCategoryReferences(db, householdId);
 
       await (db.update(db.accountsTable)..where((a) => a.householdId.equals('local')))
           .write(AccountsTableCompanion(householdId: Value(householdId)));
@@ -96,72 +95,31 @@ class AppInitService {
           .write(ReserveLinesTableCompanion(householdId: Value(householdId)));
       await (db.update(db.monthSnapshotsTable)..where((m) => m.householdId.equals('local')))
           .write(MonthSnapshotsTableCompanion(householdId: Value(householdId)));
-
-      // Orphaned data adoption: If any local records (accounts, cards, entries, etc.) belong to an
-      // old household ID (e.g. from before a DB wipe or session recreation), adopt them into the
-      // currently authenticated household so the user never loses their offline/device data.
-      final orphanedAccs = await (db.select(db.accountsTable)..where((a) => a.householdId.equals(householdId).not() & a.householdId.equals('local').not())).get();
-      final orphanedCards = await (db.select(db.creditCardsTable)..where((c) => c.householdId.equals(householdId).not() & c.householdId.equals('local').not())).get();
-      final orphanedEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(householdId).not() & e.householdId.equals('local').not())).get();
-
-      final oldHouseholdIds = {
-        ...orphanedAccs.map((a) => a.householdId),
-        ...orphanedCards.map((c) => c.householdId),
-        ...orphanedEntries.map((e) => e.householdId),
-      };
-
-      for (final oldId in oldHouseholdIds) {
-        if (oldId.isEmpty) continue;
-        await _remapLocalCategoryReferences(db, householdId, oldId);
-        await (db.update(db.accountsTable)..where((a) => a.householdId.equals(oldId)))
-            .write(AccountsTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.entriesTable)..where((e) => e.householdId.equals(oldId)))
-            .write(EntriesTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.creditCardsTable)..where((c) => c.householdId.equals(oldId)))
-            .write(CreditCardsTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.plannedBillsTable)..where((b) => b.householdId.equals(oldId)))
-            .write(PlannedBillsTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.receivablesTable)..where((r) => r.householdId.equals(oldId)))
-            .write(ReceivablesTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.savingGoalsTable)..where((g) => g.householdId.equals(oldId)))
-            .write(SavingGoalsTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.sinkingFundsTable)..where((f) => f.householdId.equals(oldId)))
-            .write(SinkingFundsTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.budgetsTable)..where((b) => b.householdId.equals(oldId)))
-            .write(BudgetsTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.reserveLinesTable)..where((r) => r.householdId.equals(oldId)))
-            .write(ReserveLinesTableCompanion(householdId: Value(householdId)));
-        await (db.update(db.monthSnapshotsTable)..where((m) => m.householdId.equals(oldId)))
-            .write(MonthSnapshotsTableCompanion(householdId: Value(householdId)));
-      }
-
       await db.accountDao.ensureOpeningBalanceEntries(householdId);
     } catch (_) {}
   }
 
-  static Future<void> _remapLocalCategoryReferences(AppDatabase db, String householdId, [String sourceHousehold = 'local']) async {
-    final localEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals(sourceHousehold))).get();
-    final localBudgets = await (db.select(db.budgetsTable)..where((b) => b.householdId.equals(sourceHousehold))).get();
+  static Future<void> _remapLocalCategoryReferences(AppDatabase db, String householdId) async {
+    final localEntries = await (db.select(db.entriesTable)..where((e) => e.householdId.equals('local'))).get();
+    final localBudgets = await (db.select(db.budgetsTable)..where((b) => b.householdId.equals('local'))).get();
     if (localEntries.isEmpty && localBudgets.isEmpty) return;
 
     await ensureUserHouseholdSeed(db, householdId);
-    final seedIds = buildSeedCategories(sourceHousehold).map((c) => c.id).toSet();
+    final seedIds = buildSeedCategories('local').map((c) => c.id).toSet();
     final householdCatIds = (await (db.select(db.categoriesTable)
               ..where((c) => c.householdId.equals(householdId)))
             .get())
         .map((c) => c.id)
         .toSet();
-    final localCats = await (db.select(db.categoriesTable)..where((c) => c.householdId.equals(sourceHousehold))).get();
+    final localCats = await (db.select(db.categoriesTable)..where((c) => c.householdId.equals('local'))).get();
 
     final mapping = <String, String>{};
     for (final cat in localCats) {
       String? target;
-      if (cat.id.endsWith('-system-cat-$sourceHousehold')) {
-        target = '${cat.id.substring(0, cat.id.length - sourceHousehold.length)}$householdId';
+      if (cat.id.endsWith('-system-cat-local')) {
+        target = '${cat.id.substring(0, cat.id.length - 'local'.length)}$householdId';
       } else if (seedIds.contains(cat.id)) {
         target = '$householdId-${cat.id}';
-      } else if (cat.id.startsWith('$sourceHousehold-')) {
-        target = '$householdId-${cat.id.substring(sourceHousehold.length + 1)}';
       }
       if (target != null && householdCatIds.contains(target)) mapping[cat.id] = target;
     }
@@ -188,7 +146,7 @@ class AppInitService {
       };
       for (final cat in localCats) {
         if (!mapping.containsKey(cat.id) && !seedIds.contains(cat.id) &&
-            !cat.id.endsWith('-system-cat-$sourceHousehold') && referenced.contains(cat.id)) {
+            !cat.id.endsWith('-system-cat-local') && referenced.contains(cat.id)) {
           await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
               .write(CategoriesTableCompanion(householdId: Value(householdId)));
         }
@@ -239,5 +197,41 @@ class AppInitService {
     await seedForHousehold(db, householdId);
     // Ensure system categories (lend, borrow, bill-pay, return-received) exist for this household.
     await db.ensureSystemCategoriesForHousehold(householdId);
+  }
+
+  /// Wipes all user data from the local Drift database.
+  ///
+  /// Call this ONLY when the user's server-side account has been permanently
+  /// deleted (i.e. DELETE /auth/me succeeded). Do NOT call on sign-out —
+  /// on sign-out we keep local data so it survives until the next sync.
+  ///
+  /// After wiping, re-seeds the offline 'local' household so the app remains
+  /// usable in guest mode immediately.
+  static Future<void> clearAllUserData(AppDatabase db) async {
+    try {
+      // Delete in dependency order (children before parents) to avoid FK errors.
+      await db.delete(db.syncQueueTable).go();
+      await db.delete(db.monthSnapshotsTable).go();
+      await db.delete(db.cardTransactionsTable).go();
+      await db.delete(db.creditCardsTable).go();
+      await db.delete(db.goalContributionsTable).go();
+      await db.delete(db.savingGoalsTable).go();
+      await db.delete(db.fundMovementsTable).go();
+      await db.delete(db.sinkingFundsTable).go();
+      await db.delete(db.receivablesTable).go();
+      await db.delete(db.plannedBillsTable).go();
+      await db.delete(db.reserveLinesTable).go();
+      await db.delete(db.annualTargetsTable).go();
+      await db.delete(db.budgetsTable).go();
+      await db.delete(db.entriesTable).go();
+      await db.delete(db.accountsTable).go();
+      await db.delete(db.categoriesTable).go();
+      await db.delete(db.usersTable).go();
+    } catch (_) {}
+
+    // Re-seed the local offline household so the app is usable in guest mode.
+    try {
+      await seed(db);
+    } catch (_) {}
   }
 }
