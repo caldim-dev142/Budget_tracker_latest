@@ -387,6 +387,8 @@ class SyncService {
           headers: {
             'Authorization': 'Bearer $token',
           },
+          sendTimeout: const Duration(seconds: 45),
+          receiveTimeout: const Duration(seconds: 45),
         ),
       );
       debugPrint('Comprehensive Batch Sync to server successful: ${res.data}');
@@ -406,6 +408,12 @@ class SyncService {
       return successCount + allEntries.length;
     } catch (e) {
       debugPrint('Error during comprehensive batch sync: $e');
+      // Even if batch push encounters an issue, attempt to pull latest server data
+      try {
+        await pullFromServer();
+      } catch (pullErr) {
+        debugPrint('Fallback pull error: $pullErr');
+      }
       return successCount;
     }
   }
@@ -432,6 +440,8 @@ class SyncService {
           headers: {
             'Authorization': 'Bearer $token',
           },
+          sendTimeout: const Duration(seconds: 45),
+          receiveTimeout: const Duration(seconds: 45),
         ),
       );
 
@@ -440,27 +450,27 @@ class SyncService {
       final unsentCloses = <String>[];
 
       await db.transaction(() async {
-        // 1. Categories
-        if (data['categories'] != null && data['categories'] is List) {
-          final cats = (data['categories'] as List).map((c) => CategoriesTableCompanion.insert(
-            id: c['id'] as String,
-            householdId: (c['householdId'] ?? householdId) as String,
-            kind: (c['kind'] ?? 'spending') as String,
-            groupCode: Value(c['groupCode'] as String?),
-            name: (c['name'] ?? 'Category') as String,
-            needOrWant: Value(c['needOrWant'] as String?),
-            isDeduction: Value((c['isDeduction'] as bool?) ?? false),
-            isSystem: Value((c['isSystem'] as bool?) ?? false),
-            sortOrder: Value((c['sortOrder'] as int?) ?? 0),
-            archivedAt: Value(c['archivedAt'] != null ? DateTime.parse(c['archivedAt'] as String) : null),
-          )).toList();
-          await db.categoryDao.upsertAll(cats);
-        }
+        await db.batch((b) {
+          // 1. Categories
+          if (data['categories'] != null && data['categories'] is List) {
+            final cats = (data['categories'] as List).map((c) => CategoriesTableCompanion.insert(
+              id: c['id'] as String,
+              householdId: (c['householdId'] ?? householdId) as String,
+              kind: (c['kind'] ?? 'spending') as String,
+              groupCode: Value(c['groupCode'] as String?),
+              name: (c['name'] ?? 'Category') as String,
+              needOrWant: Value(c['needOrWant'] as String?),
+              isDeduction: Value((c['isDeduction'] as bool?) ?? false),
+              isSystem: Value((c['isSystem'] as bool?) ?? false),
+              sortOrder: Value((c['sortOrder'] as int?) ?? 0),
+              archivedAt: Value(c['archivedAt'] != null ? DateTime.parse(c['archivedAt'] as String) : null),
+            )).toList();
+            b.insertAllOnConflictUpdate(db.categoriesTable, cats);
+          }
 
-        // 2. Accounts
-        if (data['accounts'] != null && data['accounts'] is List) {
-          for (final a in data['accounts'] as List) {
-            await db.accountDao.upsertAccount(AccountsTableCompanion.insert(
+          // 2. Accounts
+          if (data['accounts'] != null && data['accounts'] is List) {
+            final accounts = (data['accounts'] as List).map((a) => AccountsTableCompanion.insert(
               id: a['id'] as String,
               householdId: (a['householdId'] ?? householdId) as String,
               name: (a['name'] ?? 'Account') as String,
@@ -468,56 +478,52 @@ class SyncService {
               currentBalancePaise: Value((a['currentBalancePaise'] as num?)?.toInt() ?? 0),
               isActive: Value((a['isActive'] as bool?) ?? true),
               sortOrder: Value((a['sortOrder'] as int?) ?? 0),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.accountsTable, accounts);
           }
-        }
 
-        // 3. Credit Cards
-        if (data['creditCards'] != null && data['creditCards'] is List) {
-          for (final c in data['creditCards'] as List) {
-            await db.into(db.creditCardsTable).insertOnConflictUpdate(CreditCardsTableCompanion.insert(
+          // 3. Credit Cards
+          if (data['creditCards'] != null && data['creditCards'] is List) {
+            final cards = (data['creditCards'] as List).map((c) => CreditCardsTableCompanion.insert(
               id: c['id'] as String,
               householdId: (c['householdId'] ?? householdId) as String,
               name: (c['name'] ?? 'Card') as String,
               previousOutstandingPaise: Value((c['previousOutstandingPaise'] as num?)?.toInt() ?? 0),
               isActive: Value((c['isActive'] as bool?) ?? true),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.creditCardsTable, cards);
           }
-        }
 
-        // 4. Card Transactions
-        if (data['cardTransactions'] != null && data['cardTransactions'] is List) {
-          for (final t in data['cardTransactions'] as List) {
-            await db.into(db.cardTransactionsTable).insertOnConflictUpdate(CardTransactionsTableCompanion.insert(
+          // 4. Card Transactions
+          if (data['cardTransactions'] != null && data['cardTransactions'] is List) {
+            final cardTxns = (data['cardTransactions'] as List).map((t) => CardTransactionsTableCompanion.insert(
               id: t['id'] as String,
               cardId: t['cardId'] as String,
               txnDate: DateTime.parse(t['txnDate'] as String),
               description: (t['description'] ?? '') as String,
               amountPaise: (t['amountPaise'] as num?)?.toInt() ?? 0,
               sNo: Value(t['sNo'] as int?),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.cardTransactionsTable, cardTxns);
           }
-        }
 
-        // 5. Planned Bills
-        if (data['plannedBills'] != null && data['plannedBills'] is List) {
-          for (final b in data['plannedBills'] as List) {
-            await db.into(db.plannedBillsTable).insertOnConflictUpdate(PlannedBillsTableCompanion.insert(
-              id: b['id'] as String,
-              householdId: (b['householdId'] ?? householdId) as String,
-              name: (b['name'] ?? 'Bill') as String,
-              amountPaise: (b['amountPaise'] as num?)?.toInt() ?? 0,
-              dueDate: Value(b['dueDate'] != null ? DateTime.parse(b['dueDate'] as String) : null),
-              isPaid: Value((b['isPaid'] as bool?) ?? false),
-              entryId: Value((b['entryId'] ?? b['entry_id']) as String?),
-            ));
+          // 5. Planned Bills
+          if (data['plannedBills'] != null && data['plannedBills'] is List) {
+            final bills = (data['plannedBills'] as List).map((bl) => PlannedBillsTableCompanion.insert(
+              id: bl['id'] as String,
+              householdId: (bl['householdId'] ?? householdId) as String,
+              name: (bl['name'] ?? 'Bill') as String,
+              amountPaise: (bl['amountPaise'] as num?)?.toInt() ?? 0,
+              dueDate: Value(bl['dueDate'] != null ? DateTime.parse(bl['dueDate'] as String) : null),
+              isPaid: Value((bl['isPaid'] as bool?) ?? false),
+              entryId: Value((bl['entryId'] ?? bl['entry_id']) as String?),
+            )).toList();
+            b.insertAllOnConflictUpdate(db.plannedBillsTable, bills);
           }
-        }
 
-        // 6. Receivables
-        if (data['receivables'] != null && data['receivables'] is List) {
-          for (final r in data['receivables'] as List) {
-            await db.into(db.receivablesTable).insertOnConflictUpdate(ReceivablesTableCompanion.insert(
+          // 6. Receivables
+          if (data['receivables'] != null && data['receivables'] is List) {
+            final recs = (data['receivables'] as List).map((r) => ReceivablesTableCompanion.insert(
               id: r['id'] as String,
               householdId: (r['householdId'] ?? householdId) as String,
               personName: (r['personName'] ?? 'Person') as String,
@@ -525,14 +531,13 @@ class SyncService {
               status: Value((r['status'] as String?) ?? 'open'),
               dueDate: Value(r['dueDate'] != null ? DateTime.parse(r['dueDate'] as String) : null),
               entryId: Value((r['entryId'] ?? r['entry_id']) as String?),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.receivablesTable, recs);
           }
-        }
 
-        // 7. Saving Goals
-        if (data['savingGoals'] != null && data['savingGoals'] is List) {
-          for (final g in data['savingGoals'] as List) {
-            await db.into(db.savingGoalsTable).insertOnConflictUpdate(SavingGoalsTableCompanion.insert(
+          // 7. Saving Goals
+          if (data['savingGoals'] != null && data['savingGoals'] is List) {
+            final goals = (data['savingGoals'] as List).map((g) => SavingGoalsTableCompanion.insert(
               id: g['id'] as String,
               householdId: (g['householdId'] ?? householdId) as String,
               bucket: (g['bucket'] ?? 'other_goals') as String,
@@ -540,27 +545,25 @@ class SyncService {
               targetPaise: Value((g['targetPaise'] as num?)?.toInt()),
               monthlyBudgetPaise: Value((g['monthlyBudgetPaise'] as num?)?.toInt() ?? 0),
               archivedAt: Value(g['archivedAt'] != null ? DateTime.parse(g['archivedAt'] as String) : null),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.savingGoalsTable, goals);
           }
-        }
 
-        // 8. Sinking Funds
-        if (data['sinkingFunds'] != null && data['sinkingFunds'] is List) {
-          for (final f in data['sinkingFunds'] as List) {
-            await db.into(db.sinkingFundsTable).insertOnConflictUpdate(SinkingFundsTableCompanion.insert(
+          // 8. Sinking Funds
+          if (data['sinkingFunds'] != null && data['sinkingFunds'] is List) {
+            final funds = (data['sinkingFunds'] as List).map((f) => SinkingFundsTableCompanion.insert(
               id: f['id'] as String,
               householdId: (f['householdId'] ?? householdId) as String,
               name: (f['name'] ?? 'Fund') as String,
               openingReservePaise: Value((f['openingReservePaise'] as num?)?.toInt() ?? 0),
               archivedAt: Value(f['archivedAt'] != null ? DateTime.parse(f['archivedAt'] as String) : null),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.sinkingFundsTable, funds);
           }
-        }
 
-        // 9. Entries
-        if (data['entries'] != null && data['entries'] is List) {
-          for (final e in data['entries'] as List) {
-            await db.entryDao.insertEntry(EntriesTableCompanion.insert(
+          // 9. Entries
+          if (data['entries'] != null && data['entries'] is List) {
+            final entries = (data['entries'] as List).map((e) => EntriesTableCompanion.insert(
               id: e['id'] as String,
               householdId: (e['householdId'] ?? householdId) as String,
               categoryId: e['categoryId'] as String,
@@ -576,84 +579,72 @@ class SyncService {
               createdAt: DateTime.parse((e['createdAt'] ?? e['entryDate']) as String),
               updatedAt: DateTime.parse((e['updatedAt'] ?? e['entryDate']) as String),
               deletedAt: Value(e['deletedAt'] != null ? DateTime.parse(e['deletedAt'] as String) : null),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.entriesTable, entries);
           }
-        }
 
-        // 10. Goal Contributions
-        if (data['goalContributions'] != null && data['goalContributions'] is List) {
-          for (final gc in data['goalContributions'] as List) {
-            await db.into(db.goalContributionsTable).insertOnConflictUpdate(GoalContributionsTableCompanion.insert(
+          // 10. Goal Contributions
+          if (data['goalContributions'] != null && data['goalContributions'] is List) {
+            final contribs = (data['goalContributions'] as List).map((gc) => GoalContributionsTableCompanion.insert(
               id: gc['id'] as String,
               goalId: gc['goalId'] as String,
               amountPaise: (gc['amountPaise'] as num?)?.toInt() ?? 0,
               contributionDate: DateTime.parse(gc['contributionDate'] as String),
               note: Value(gc['note'] as String?),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.goalContributionsTable, contribs);
           }
-        }
 
-        // 11. Fund Movements
-        if (data['fundMovements'] != null && data['fundMovements'] is List) {
-          for (final fm in data['fundMovements'] as List) {
-            await db.into(db.fundMovementsTable).insertOnConflictUpdate(FundMovementsTableCompanion.insert(
+          // 11. Fund Movements
+          if (data['fundMovements'] != null && data['fundMovements'] is List) {
+            final movements = (data['fundMovements'] as List).map((fm) => FundMovementsTableCompanion.insert(
               id: fm['id'] as String,
               fundId: fm['fundId'] as String,
               type: (fm['type'] ?? 'contribution') as String,
               amountPaise: (fm['amountPaise'] as num?)?.toInt() ?? 0,
               movementDate: DateTime.parse(fm['movementDate'] as String),
               note: Value(fm['note'] as String?),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.fundMovementsTable, movements);
           }
-        }
 
-        // 12. Budgets
-        if (data['budgets'] != null && data['budgets'] is List) {
-          for (final b in data['budgets'] as List) {
-            final budgetHouseholdId = (b['householdId'] ?? householdId) as String;
-            await (db.delete(db.budgetsTable)
-                  ..where((t) =>
-                      t.householdId.equals(budgetHouseholdId) &
-                      t.categoryId.equals(b['categoryId'] as String) &
-                      t.yearMonth.equals(b['yearMonth'] as String) &
-                      t.id.equals(b['id'] as String).not()))
-                .go();
-            await db.into(db.budgetsTable).insertOnConflictUpdate(BudgetsTableCompanion.insert(
-              id: b['id'] as String,
-              householdId: (b['householdId'] ?? householdId) as String,
-              categoryId: b['categoryId'] as String,
-              yearMonth: b['yearMonth'] as String,
-              amountPaise: Value((b['amountPaise'] as num?)?.toInt() ?? 0),
-            ));
+          // 12. Budgets
+          if (data['budgets'] != null && data['budgets'] is List) {
+            final budgets = (data['budgets'] as List).map((bg) => BudgetsTableCompanion.insert(
+              id: bg['id'] as String,
+              householdId: (bg['householdId'] ?? householdId) as String,
+              categoryId: bg['categoryId'] as String,
+              yearMonth: bg['yearMonth'] as String,
+              amountPaise: Value((bg['amountPaise'] as num?)?.toInt() ?? 0),
+            )).toList();
+            b.insertAllOnConflictUpdate(db.budgetsTable, budgets);
           }
-        }
 
-        // 13. Reserve Lines
-        if (data['reserveLines'] != null && data['reserveLines'] is List) {
-          for (final rl in data['reserveLines'] as List) {
-            await db.into(db.reserveLinesTable).insertOnConflictUpdate(ReserveLinesTableCompanion.insert(
+          // 13. Reserve Lines
+          if (data['reserveLines'] != null && data['reserveLines'] is List) {
+            final lines = (data['reserveLines'] as List).map((rl) => ReserveLinesTableCompanion.insert(
               id: rl['id'] as String,
               householdId: (rl['householdId'] ?? householdId) as String,
               yearMonth: rl['yearMonth'] as String,
               name: (rl['name'] ?? 'Reserve') as String,
               amountPaise: (rl['amountPaise'] as num?)?.toInt() ?? 0,
               source: Value((rl['source'] as String?) ?? 'manual'),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.reserveLinesTable, lines);
           }
-        }
 
-        // 14. Annual Targets
-        if (data['annualTargets'] != null && data['annualTargets'] is List) {
-          for (final at in data['annualTargets'] as List) {
-            await db.into(db.annualTargetsTable).insertOnConflictUpdate(AnnualTargetsTableCompanion.insert(
+          // 14. Annual Targets
+          if (data['annualTargets'] != null && data['annualTargets'] is List) {
+            final targets = (data['annualTargets'] as List).map((at) => AnnualTargetsTableCompanion.insert(
               id: at['id'] as String,
               householdId: (at['householdId'] ?? householdId) as String,
               title: (at['title'] ?? '') as String,
               targetPaise: (at['targetPaise'] as num?)?.toInt() ?? 0,
               type: Value((at['type'] as String?) ?? 'income'),
-            ));
+            )).toList();
+            b.insertAllOnConflictUpdate(db.annualTargetsTable, targets);
           }
-        }
+        });
 
         // 15. Propagation of deleted entries (prevents resurrection of locally cached records)
         if (data['deletedEntryIds'] != null && data['deletedEntryIds'] is List) {

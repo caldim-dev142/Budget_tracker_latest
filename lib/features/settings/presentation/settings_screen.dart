@@ -306,6 +306,7 @@ class SettingsScreen extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(18),
                   onTap: () => _handleSignOut(context, ref),
                   child: ListTile(
+                    onTap: () => _handleSignOut(context, ref),
                     leading: Icon(Icons.logout_rounded, color: cs.error),
                     title: Text(
                       'Sign Out',
@@ -932,68 +933,122 @@ class SettingsScreen extends ConsumerWidget {
 
   /// Signs out, clearing this device's data only once the server has the
   /// user's changes.
-  ///
-  /// logout() pushes pending work first and returns how much could NOT be
-  /// delivered. When that is non-zero it deliberately keeps the local data
-  /// rather than destroying unsynced changes, and we ask the user what to do.
+  /// Prompts for confirmation, pushes pending work, and signs out cleanly.
   Future<void> _handleSignOut(BuildContext context, WidgetRef ref) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    int unsynced;
-    try {
-      unsynced = await ref.read(authStateNotifierProvider.notifier).logout();
-    } catch (e) {
-      if (!context.mounted) return;
-      Navigator.pop(context);
-      AppFeedback.showError(context, 'Sign out failed', error: e);
-      return;
-    }
-
-    if (!context.mounted) return;
-    Navigator.pop(context); // dismiss spinner
-
-    if (unsynced == 0) {
-      context.go('/auth/login');
-      return;
-    }
-
-    // Signed out, but this device still holds changes the server never received.
-    final discard = await showDialog<bool>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Unsynced changes'),
-        content: Text(
-          '$unsynced change${unsynced == 1 ? '' : 's'} could not be sent to the '
-          'server, so they exist only on this phone.\n\n'
-          'They have been kept. Sign in again with the same account while '
-          'connected to upload them.\n\n'
-          'Removing them now deletes them permanently.',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: Colors.redAccent),
+            SizedBox(width: 10),
+            Text('Sign Out'),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to sign out? Your synchronized data remains safe on the cloud.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('Keep on this device'),
+            child: const Text('Cancel'),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(dialogCtx).colorScheme.error,
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogCtx).colorScheme.error,
+              foregroundColor: Theme.of(dialogCtx).colorScheme.onError,
             ),
-            child: const Text('Delete anyway'),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Sign Out'),
           ),
         ],
       ),
     );
 
-    if (discard == true) {
-      await ref.read(authStateNotifierProvider.notifier).logout(force: true);
+    if (confirmed != true || !context.mounted) return;
+
+    BuildContext? progressCtx;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        progressCtx = ctx;
+        return const PopScope(
+          canPop: false,
+          child: Center(
+            child: Card(
+              elevation: 6,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Signing out...', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    int unsynced = 0;
+    try {
+      unsynced = await ref.read(authStateNotifierProvider.notifier).logout();
+    } catch (e) {
+      if (progressCtx != null && progressCtx!.mounted) {
+        Navigator.of(progressCtx!).pop();
+      }
+      if (context.mounted) {
+        AppFeedback.showError(context, 'Sign out failed', error: e);
+      }
+      return;
     }
 
-    if (context.mounted) context.go('/auth/login');
+    if (progressCtx != null && progressCtx!.mounted) {
+      Navigator.of(progressCtx!).pop();
+    }
+
+    if (unsynced > 0 && context.mounted) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (dialogCtx) => AlertDialog(
+          title: const Text('Unsynced changes'),
+          content: Text(
+            '$unsynced change${unsynced == 1 ? '' : 's'} could not be sent to the '
+            'server, so they exist only on this phone.\n\n'
+            'They have been kept. Sign in again with the same account while '
+            'connected to upload them.\n\n'
+            'Removing them now deletes them permanently.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: const Text('Keep on this device'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(dialogCtx).colorScheme.error,
+              ),
+              child: const Text('Delete anyway'),
+            ),
+          ],
+        ),
+      );
+
+      if (discard == true) {
+        await ref.read(authStateNotifierProvider.notifier).logout(force: true);
+      }
+    }
+
+    if (context.mounted) {
+      context.go('/auth/login');
+    }
   }
 
   void _showServerUrlDialog(BuildContext context, WidgetRef ref) {

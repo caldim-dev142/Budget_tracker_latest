@@ -122,9 +122,9 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
   final Ref _ref;
   final _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
-      sendTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 45),
+      sendTimeout: const Duration(seconds: 45),
       contentType: 'application/json',
       headers: {
         'Content-Type': 'application/json',
@@ -1087,20 +1087,18 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
   Future<int> logout({bool force = false}) async {
     final db = _ref.read(appDatabaseProvider);
 
-    // 1. Best-effort push of anything still queued, so logging out never
-    //    silently discards work. Failures here are expected when offline.
-    try {
-      await _ref.read(syncServiceProvider).syncAllQueue();
-    } catch (_) {}
-
-    // 2. Ask the queue — not the sync call's return value — whether everything
-    //    actually landed. syncAllQueue() returns 0 both when there was nothing
-    //    to do and when the push failed, so it cannot be trusted as proof.
     int stillPending = 0;
     try {
       stillPending = await db.syncQueueDao.pendingCount();
+      // Only push if there are actual pending items to push, with a tight timeout
+      if (stillPending > 0 && !force) {
+        await _ref.read(syncServiceProvider).syncAllQueue().timeout(
+          const Duration(seconds: 4),
+          onTimeout: () => 0,
+        );
+        stillPending = await db.syncQueueDao.pendingCount();
+      }
     } catch (_) {
-      // If we cannot even read the queue, assume the worst and keep the data.
       stillPending = force ? 0 : 1;
     }
 
@@ -1121,25 +1119,30 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     try {
       final serverUrl = _ref.read(serverUrlProvider);
       // The server revokes refresh tokens by session family (DEF-AUTH-02).
-      // Sending the raw refresh token here matched nothing, so sessions stayed valid after logout.
       final family = await SecureStore.readRefreshTokenFamily();
-      if (family != null && family.isNotEmpty) {
+      if (family != null && family.isNotEmpty && serverUrl.isNotEmpty) {
         await _dio.post(
           '$serverUrl/auth/logout',
           data: {'family': family},
+          options: Options(
+            sendTimeout: const Duration(seconds: 3),
+            receiveTimeout: const Duration(seconds: 3),
+          ),
         );
       }
     } catch (_) {}
 
-    try {
-      await FirebaseAuth.instance.signOut();
-    } catch (_) {}
+    await Future.wait([
+      FirebaseAuth.instance.signOut().catchError((_) {}),
+      () async {
+        try {
+          if (await _googleSignIn.isSignedIn()) {
+            await _googleSignIn.signOut();
+          }
+        } catch (_) {}
+      }(),
+    ]);
 
-    try {
-      if (await _googleSignIn.isSignedIn()) {
-        await _googleSignIn.signOut();
-      }
-    } catch (_) {}
     await SecureStore.clearTokens();
     await SecureStore.delete('auth_email');
     await SecureStore.delete('auth_name');

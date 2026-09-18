@@ -642,6 +642,13 @@ export class SyncService {
    * Pull all household data from PostgreSQL database to synchronize client cache (GET /sync/pull).
    */
   async pullData(householdId: string) {
+    // Run in controlled batches (max 6 parallel) to respect database connection limits.
+    // NOTE: intentionally NOT filtering by isActive/archivedAt here. A device that already
+    // has a local copy of an account/card/goal/fund/category needs to learn when another
+    // device deactivates or archives it; excluding those rows meant the deactivation never
+    // reached other devices and the stale local copy stayed "active" forever (data-persistence
+    // audit finding, 2026-09-17). The client already applies isActive/archivedAt correctly on
+    // upsert — it only needed the row to actually be included in the response.
     const [
       accounts,
       creditCards,
@@ -649,24 +656,7 @@ export class SyncService {
       plannedBills,
       receivables,
       savingGoals,
-      goalContributions,
-      sinkingFunds,
-      fundMovements,
-      budgets,
-      reserveLines,
-      annualTargets,
-      categories,
-      entries,
-      deletedEntries,
-      tombstones,
-      monthSnapshots,
     ] = await Promise.all([
-      // NOTE: intentionally NOT filtering by isActive/archivedAt here. A device that already
-      // has a local copy of an account/card/goal/fund/category needs to learn when another
-      // device deactivates or archives it; excluding those rows meant the deactivation never
-      // reached other devices and the stale local copy stayed "active" forever (data-persistence
-      // audit finding, 2026-09-17). The client already applies isActive/archivedAt correctly on
-      // upsert — it only needed the row to actually be included in the response.
       this.prisma.account.findMany({
         where: { householdId },
         orderBy: { sortOrder: 'asc' },
@@ -689,6 +679,16 @@ export class SyncService {
       this.prisma.savingGoal.findMany({
         where: { householdId },
       }),
+    ]);
+
+    const [
+      goalContributions,
+      sinkingFunds,
+      fundMovements,
+      budgets,
+      reserveLines,
+      annualTargets,
+    ] = await Promise.all([
       this.prisma.goalContribution.findMany({
         where: { goal: { householdId } },
         orderBy: { contributionDate: 'desc' },
@@ -709,6 +709,15 @@ export class SyncService {
       this.prisma.annual_targets.findMany({
         where: { household_id: householdId },
       }),
+    ]);
+
+    const [
+      categories,
+      entries,
+      deletedEntries,
+      tombstones,
+      monthSnapshots,
+    ] = await Promise.all([
       this.prisma.category.findMany({
         where: { householdId },
         orderBy: { sortOrder: 'asc' },
