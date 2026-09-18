@@ -105,7 +105,7 @@ export class HouseholdsService {
 
     // Rate-limit: max 5 active (unexpired + unused) codes per household at a time.
     const now = new Date();
-    const activeCount = await (this.prisma as any).householdInvite.count({
+    const activeCount = await this.prisma.householdInvite.count({
       where: {
         householdId: household.id,
         usedAt: null,
@@ -122,7 +122,7 @@ export class HouseholdsService {
     const code = this.generateCode();
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24h
 
-    await (this.prisma as any).householdInvite.create({
+    await this.prisma.householdInvite.create({
       data: {
         id: uuidv4(),
         householdId: household.id,
@@ -142,12 +142,13 @@ export class HouseholdsService {
    * - Accepts only the 8-char invite code, never the raw household UUID.
    * - Expired or already-redeemed codes are rejected.
    * - Redemption is atomic: usedAt + usedBy are written in the same transaction
-   *   as the user update, preventing double-use under concurrent requests.
+   *   with a guarded updateMany({ where: { code, usedAt: null, expiresAt: { gt: now } } }).
+   *   If another concurrent request burned the code first, count is 0 and it throws.
    */
   async joinByCode(userId: string, inviteCode: string) {
     const code = inviteCode.trim().toUpperCase();
 
-    const invite = await (this.prisma as any).householdInvite.findUnique({
+    const invite = await this.prisma.householdInvite.findUnique({
       where: { code },
     });
 
@@ -181,12 +182,17 @@ export class HouseholdsService {
       throw new NotFoundException('User not found.');
     }
 
-    // Atomic redemption: burn the code and update the user in one transaction.
+    // Atomic redemption: guarded update ensures only one concurrent request succeeds.
     await this.prisma.$transaction(async (tx) => {
-      await (tx as any).householdInvite.update({
-        where: { code },
+      const burned = await tx.householdInvite.updateMany({
+        where: { code, usedAt: null, expiresAt: { gt: now } },
         data: { usedAt: now, usedBy: user.id },
       });
+      if (burned.count !== 1) {
+        throw new BadRequestException(
+          'This invite code has already been used. Please ask the household owner for a new code.',
+        );
+      }
       await tx.user.update({
         where: { id: user.id },
         data: { household_id: household.id },

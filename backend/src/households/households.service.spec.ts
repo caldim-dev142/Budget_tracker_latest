@@ -53,11 +53,13 @@ describe('HouseholdsService', () => {
       $transaction: jest.fn((callback) => callback(prismaMock)),
       // householdInvite — accessed via (prisma as any) since it requires
       // client regeneration (blocked in dev by the running NestJS process).
+      // householdInvite
       householdInvite: {
         count: jest.fn(),
         create: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
     };
 
@@ -135,6 +137,24 @@ describe('HouseholdsService', () => {
       await expect(service.joinByCode('usr-2', 'EXPRCODE')).rejects.toThrow(BadRequestException);
     });
 
+    it('should throw BadRequestException if concurrent redemption occurs and updateMany returns count 0', async () => {
+      prismaMock.householdInvite.findUnique.mockResolvedValue({
+        code: 'RACEC0D1',
+        householdId: 'hsh-100',
+        usedAt: null,
+        expiresAt: futureDate,
+      });
+      prismaMock.household.findUnique.mockResolvedValue(household);
+      prismaMock.user.findUnique.mockResolvedValue(user);
+      prismaMock.householdInvite.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.joinByCode('usr-2', 'RACEC0D1')).rejects.toThrow(
+        new BadRequestException(
+          'This invite code has already been used. Please ask the household owner for a new code.',
+        ),
+      );
+    });
+
     it('should associate user with household and burn the code atomically on valid invite', async () => {
       prismaMock.householdInvite.findUnique.mockResolvedValue({
         code: 'VALIDC0D',
@@ -144,6 +164,7 @@ describe('HouseholdsService', () => {
       });
       prismaMock.household.findUnique.mockResolvedValue(household);
       prismaMock.user.findUnique.mockResolvedValue(user);
+      prismaMock.householdInvite.updateMany.mockResolvedValue({ count: 1 });
       prismaMock.user.findMany.mockResolvedValue([
         { id: 'usr-1', email: 'owner@test.com', displayName: 'Owner' },
         { id: 'usr-2', email: 'member@test.com', displayName: 'Member' },
@@ -151,12 +172,16 @@ describe('HouseholdsService', () => {
 
       const result = await service.joinByCode('usr-2', 'VALIDC0D');
 
-      // Code must be burned (usedAt set) and user must be linked — both in transaction
+      // Code must be burned with atomic guard and user linked
       expect(prismaMock.$transaction).toHaveBeenCalled();
-      expect(prismaMock.householdInvite.update).toHaveBeenCalledWith(
+      expect(prismaMock.householdInvite.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { code: 'VALIDC0D' },
-          data: expect.objectContaining({ usedBy: 'usr-2' }),
+          where: {
+            code: 'VALIDC0D',
+            usedAt: null,
+            expiresAt: { gt: expect.any(Date) },
+          },
+          data: expect.objectContaining({ usedBy: 'usr-2', usedAt: expect.any(Date) }),
         }),
       );
       expect(prismaMock.user.update).toHaveBeenCalledWith({
@@ -173,7 +198,6 @@ describe('HouseholdsService', () => {
   describe('generateInvite', () => {
     const ownerUser = { id: 'usr-1', email: 'owner@test.com', household_id: 'hsh-1' };
     const household = { id: 'hsh-1', name: 'My Household', ownerId: 'usr-1' };
-    const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     it('should throw NotFoundException if user has no household', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ id: 'usr-1', household_id: null });
@@ -196,7 +220,7 @@ describe('HouseholdsService', () => {
       );
     });
 
-    it('should generate and store an 8-char code for the owner', async () => {
+    it('should generate and store an 8-char code for the owner matching /^[A-HJ-NP-Z2-9]{8}$/', async () => {
       prismaMock.user.findUnique.mockResolvedValue(ownerUser);
       prismaMock.household.findUnique.mockResolvedValue(household);
       prismaMock.householdInvite.count.mockResolvedValue(0);
@@ -212,7 +236,8 @@ describe('HouseholdsService', () => {
           }),
         }),
       );
-      expect(result.code).toMatch(/^[A-Z2-9]{8}$/);
+      expect(result.code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+      expect(result.code).not.toMatch(/[01IOio]/);
       expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now());
     });
   });
