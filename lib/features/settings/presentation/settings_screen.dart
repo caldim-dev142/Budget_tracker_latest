@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:dio/dio.dart';
 
 import '../../../core/utils/csv_exporter/csv_exporter.dart';
 import '../../../core/utils/category_icons.dart';
@@ -166,8 +167,13 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsTile(
             icon: Icons.sync_outlined,
             title: 'Force Sync',
+            subtitle: _backupStatusLabel(ref),
             onTap: () => _forceSync(context, ref),
           ),
+          // Backup state must be visible WITHOUT tapping anything. A user whose
+          // sync has quietly been failing needs to see it before they decide to
+          // reinstall the app.
+          const _BackupStatusBanner(),
 
           // Server Connection
           const SizedBox(height: 12),
@@ -907,28 +913,140 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Future<void> _forceSync(BuildContext context, WidgetRef ref) async {
+    final syncService = ref.read(syncServiceProvider);
+    if (syncService.isSyncRunning) {
+      AppFeedback.showInfo(context, 'A sync is already in progress.');
+      return;
+    }
+
+    final cancelToken = CancelToken();
+    bool isDialogDismissed = false;
+    BuildContext? dialogContext;
+
+    void dismissDialog() {
+      if (!isDialogDismissed && dialogContext != null && dialogContext!.mounted) {
+        isDialogDismissed = true;
+        Navigator.of(dialogContext!, rootNavigator: true).pop();
+      }
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (ctx) {
+        dialogContext = ctx;
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            cancelToken.cancel('User cancelled sync');
+            dismissDialog();
+          },
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 16),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 24),
+                const Text(
+                  'Syncing with server...',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Backing up local data and fetching updates.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 20),
+                TextButton(
+                  onPressed: () {
+                    cancelToken.cancel('User cancelled sync');
+                    dismissDialog();
+                  },
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
 
     try {
-      final count = await ref.read(syncServiceProvider).syncAllQueue();
-      if (context.mounted) {
-        Navigator.pop(context); // Pop loading spinner
-        if (count > 0) {
-          AppFeedback.showSuccess(context, 'Force sync completed! Synced $count changes.');
-        } else {
-          AppFeedback.showInfo(context, 'Already up to date. No pending changes to sync.');
-        }
+      final outcome = await syncService.syncAllQueue(
+        cancelToken: cancelToken,
+        timeout: const Duration(seconds: 30),
+      );
+
+      dismissDialog();
+      if (!context.mounted) return;
+
+      if (outcome.status == SyncStatus.cancelled) {
+        // User cancelled; quietly return without showing errors or stale state.
+        return;
       }
+
+      if (outcome.status == SyncStatus.inProgress) {
+        AppFeedback.showInfo(context, outcome.message);
+        return;
+      }
+
+      if (outcome.status == SyncStatus.timedOut) {
+        AppFeedback.showError(
+          context,
+          'Sync timed out. Your changes remain saved on this device.',
+          error: outcome.error,
+        );
+        return;
+      }
+
+      if (!outcome.isSuccess) {
+        AppFeedback.showError(context, outcome.message, error: outcome.error);
+        return;
+      }
+
+      if (outcome.hasUnsyncedData) {
+        AppFeedback.showWarning(context, outcome.message);
+        return;
+      }
+
+      AppFeedback.showSuccess(context, outcome.message);
     } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context);
+      dismissDialog();
+      if (context.mounted && !cancelToken.isCancelled) {
         AppFeedback.showError(context, 'Sync failed', error: e);
       }
+    } finally {
+      dismissDialog();
     }
+  }
+
+  /// One-line backup state for the Force Sync tile: how long ago the device
+  /// last reached the server, and how much is still waiting.
+  String _backupStatusLabel(WidgetRef ref) {
+    // Kick off the one-time load of the persisted timestamp.
+    ref.watch(lastSyncBootstrapProvider);
+
+    final pending = ref.watch(pendingSyncCountProvider).valueOrNull ?? 0;
+    final lastSync = ref.watch(lastSyncAtProvider);
+
+    final backedUp = lastSync == null
+        ? 'Never backed up'
+        : 'Last backup ${_relativeTime(lastSync)}';
+
+    if (pending == 0) return backedUp;
+    return '$backedUp • $pending waiting';
+  }
+
+  static String _relativeTime(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    return '${d.inDays}d ago';
   }
 
   /// Signs out, clearing this device's data only once the server has the
@@ -1212,6 +1330,76 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
+
+/// Warns when this device holds financial records the server never received.
+///
+/// This is the surface that was missing when a user lost data: sync had been
+/// failing silently, nothing on screen indicated it, and they reinstalled the
+/// app believing everything was safely on the server.
+class _BackupStatusBanner extends ConsumerWidget {
+  const _BackupStatusBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final health = ref.watch(syncHealthProvider);
+    if (health == SyncHealth.healthy) return const SizedBox.shrink();
+
+    final pending = ref.watch(pendingSyncCountProvider).valueOrNull ?? 0;
+    final lastSync = ref.watch(lastSyncAtProvider);
+    final isStale = health == SyncHealth.stale;
+    final cs = Theme.of(context).colorScheme;
+
+    final color = isStale ? cs.error : Colors.amber.shade800;
+    final plural = pending == 1 ? '' : 's';
+
+    String text;
+    if (!isStale) {
+      text = '$pending change$plural waiting to be backed up.';
+    } else if (lastSync == null) {
+      text = '$pending change$plural have never been backed up. '
+          'They exist only on this phone — do not uninstall the app.';
+    } else {
+      text = '$pending change$plural have not reached the server since '
+          '${SettingsScreen._relativeTime(lastSync)}. '
+          'They exist only on this phone.';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              isStale ? Icons.warning_amber_rounded : Icons.cloud_upload_outlined,
+              size: 18,
+              color: color,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SettingsTile extends StatelessWidget {
   final IconData icon;

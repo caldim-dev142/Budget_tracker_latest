@@ -1,23 +1,16 @@
 import { Module, Global } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-
-const prismaProvider = {
-  provide: 'PRISMA',
-  useFactory: async () => {
-    const prisma = new PrismaClient({
-      log:
-        process.env.NODE_ENV === 'development'
-          ? ['query', 'info', 'warn', 'error']
-          : ['error'],
-    });
-    await prisma.$connect();
-    return prisma;
-  },
-};
+import { PrismaService } from './prisma.service';
 
 @Global()
 @Module({
-  providers: [prismaProvider],
-  exports: ['PRISMA'],
+  providers: [
+    PrismaService,
+    {
+      provide: 'PRISMA',
+      useExisting: PrismaService,
+    },
+  ],
+  exports: [PrismaService, 'PRISMA'],
 })
 export class DatabaseModule {}
+

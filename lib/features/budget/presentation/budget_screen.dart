@@ -170,6 +170,22 @@ class BudgetScreen extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      initialValue: kind,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Category Type'),
+                      items: const [
+                        DropdownMenuItem(value: 'spending', child: Text('Expense (Spending)')),
+                        DropdownMenuItem(value: 'income', child: Text('Income')),
+                        DropdownMenuItem(value: 'protection', child: Text('Protection (Insurance/EMI)')),
+                        DropdownMenuItem(value: 'saving', child: Text('Saving & Investment')),
+                        DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setState(() => kind = v);
+                      },
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: nameCtrl,
                       decoration: const InputDecoration(
@@ -188,22 +204,21 @@ class BudgetScreen extends ConsumerWidget {
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: kind,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Category Type'),
-                      items: const [
-                        DropdownMenuItem(value: 'spending', child: Text('Expense (Spending)')),
-                        DropdownMenuItem(value: 'income', child: Text('Income')),
-                        DropdownMenuItem(value: 'protection', child: Text('Protection (Insurance/EMI)')),
-                        DropdownMenuItem(value: 'saving', child: Text('Saving & Investment')),
-                        DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) setState(() => kind = v);
-                      },
-                    ),
+                    if (kind == 'spending') ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: needOrWant,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Classification'),
+                        items: const [
+                          DropdownMenuItem(value: 'need', child: Text('Need')),
+                          DropdownMenuItem(value: 'want', child: Text('Want')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setState(() => needOrWant = v);
+                        },
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -905,22 +920,6 @@ class _BudgetGroupCard extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Category Name *',
-                    hintText: 'e.g. Groceries',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: groupCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Group / Subcategory',
-                    hintText: 'e.g. Food & Dining',
-                  ),
-                ),
-                const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: kind,
                   decoration: const InputDecoration(labelText: 'Category Type'),
@@ -934,6 +933,22 @@ class _BudgetGroupCard extends ConsumerWidget {
                   onChanged: (v) {
                     if (v != null) setState(() => kind = v);
                   },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Category Name *',
+                    hintText: 'e.g. Groceries',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: groupCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Sub Category',
+                    hintText: 'e.g. Food & Dining',
+                  ),
                 ),
                 if (kind == 'spending') ...[
                   const SizedBox(height: 12),

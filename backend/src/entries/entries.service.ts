@@ -54,6 +54,12 @@ function isUnchanged(existing: any, dto: CreateEntryDto, categoryId: string | un
     && sameInstant(existing.deletedAt, deletedAt);
 }
 
+export interface ValidEntryWrite {
+  action: 'create' | 'update';
+  id: string;
+  data: any;
+}
+
 @Injectable()
 export class EntriesService {
   constructor(@Inject('PRISMA') private readonly prisma: PrismaClient) {}
@@ -76,35 +82,10 @@ export class EntriesService {
   }
 
   /**
-   * Upsert a batch of entries — idempotent sync (doc 07 POST /sync/batch).
-   * Last-write-wins on version number.
+   * Phase 1: Validate a batch of entries without performing database writes.
+   * Returns valid entry write operations, needed categories to ensure, and counts of synced vs rejected entries.
    */
-  async upsertBatch(householdId: string, entries: CreateEntryDto[], userId: string) {
-    // Ensure default categories exist for this household if missing
-    const catCount = await this.prisma.category.count({ where: { householdId } });
-    if (catCount === 0) {
-      try {
-        const data = seedCategories.map((c) => ({
-          id: `${householdId}-${c.id}`,
-          householdId,
-          kind: c.kind,
-          groupCode: c.groupCode ?? null,
-          name: c.name,
-          needOrWant: c.needOrWant ?? null,
-          isDeduction: c.isDeduction,
-          isSystem: c.isSystem,
-          sortOrder: c.sortOrder,
-        }));
-        await this.prisma.category.createMany({
-          data,
-          skipDuplicates: true,
-        });
-      } catch (e) {
-        console.error('Failed to auto-seed categories in upsertBatch:', e);
-      }
-    }
-
-    // Collect distinct category IDs needed by incoming entries
+  async validateBatch(householdId: string, entries: CreateEntryDto[], userId: string) {
     const neededCategories = new Map<string, { kind: string; name: string }>();
     for (const dto of entries) {
       const categoryId = normalizeCategoryId(dto.categoryId, householdId);
@@ -116,28 +97,9 @@ export class EntriesService {
       }
     }
 
-    // Ensure all needed categories exist in DB using upsert (atomic and collision-free).
-    // Canonical system categories are created with their approved metadata (isDeduction etc.).
-    const systemCategoryData = new Map(buildSystemCategoriesForHousehold(householdId).map((c) => [c.id, c]));
-    for (const [catId, info] of neededCategories.entries()) {
-      try {
-        const existingCat = await this.prisma.category.findUnique({ where: { id: catId } });
-        if (existingCat) continue;
-        await this.prisma.category.upsert({
-          where: { id: catId },
-          create: systemCategoryData.get(catId) ?? {
-            id: catId,
-            householdId,
-            kind: info.kind,
-            name: info.name,
-            sortOrder: 999,
-          },
-          update: {},
-        });
-      } catch (_) {
-        // Safe to ignore if already created
-      }
-    }
+    const validWrites: ValidEntryWrite[] = [];
+    let syncedCount = 0;
+    let failedCount = 0;
 
     const results = await Promise.allSettled(
       entries.map(async (dto) => {
@@ -165,7 +127,7 @@ export class EntriesService {
 
         // A re-sent, unchanged entry (full-state push) is acknowledged without touching the row.
         if (existing && isUnchanged(existing, dto, categoryId, amountPaise, incomingDate, incomingDeletedAt)) {
-          return existing;
+          return { type: 'noop', id: dto.id };
         }
 
         // Closed month guard: both the month the entry currently belongs to and the month it
@@ -190,17 +152,6 @@ export class EntriesService {
           if (catExists && catExists.householdId && catExists.householdId !== householdId) {
             throw new ForbiddenException(`Category ${categoryId} belongs to a different household.`);
           }
-          if (!catExists) {
-            await this.prisma.category.create({
-              data: systemCategoryData.get(categoryId) ?? {
-                id: categoryId,
-                householdId,
-                kind: dto.kind ?? 'spending',
-                name: dto.categoryId ?? 'Uncategorized',
-                sortOrder: 999,
-              },
-            }).catch(() => {});
-          }
         }
 
         // Validate accountId if provided
@@ -224,64 +175,172 @@ export class EntriesService {
           // Last-write-wins only when incoming version >= server version.
           if (dto.version !== undefined && dto.version !== null && dto.version < existing.version) {
             // Stale update — do not overwrite newer server data
-            return existing;
+            return { type: 'noop', id: dto.id };
           }
 
           // Tombstone protection: a deleted entry is only revived by a strictly newer version.
           // An offline edit made on an older copy must not silently undo a deletion.
           if (existing.deletedAt && !incomingDeletedAt && !(typeof dto.version === 'number' && dto.version > existing.version)) {
-            return existing;
+            return { type: 'noop', id: dto.id };
           }
 
-          return this.prisma.entry.update({
-            where: { id: dto.id },
-            data: {
-              categoryId,
-              kind: dto.kind,
-              accountId: dto.accountId ?? null,
-              cardId: dto.cardId ?? null,
-              entryDate: incomingDate,
-              amountPaise,
-              note: dto.note ?? null,
-              parentId: dto.parentId ?? null,
-              updatedAt: new Date(dto.updatedAt ?? Date.now()),
-              deletedAt: incomingDeletedAt,
-              version: Math.max(dto.version ?? existing.version, existing.version) + 1,
-            },
-          });
-        } else {
-          return this.prisma.entry.create({
-            data: {
+          return {
+            type: 'write',
+            write: {
+              action: 'update' as const,
               id: dto.id,
-              householdId,
-              categoryId: categoryId,
-              kind: dto.kind,
-              accountId: dto.accountId ?? null,
-              cardId: dto.cardId ?? null,
-              entryDate: incomingDate,
-              amountPaise,
-              note: dto.note ?? null,
-              parentId: dto.parentId ?? null,
-              createdBy: userId,
-              version: dto.version ?? 1,
-              createdAt: new Date(dto.createdAt ?? Date.now()),
-              updatedAt: new Date(dto.updatedAt ?? Date.now()),
-              deletedAt: incomingDeletedAt,
+              data: {
+                categoryId,
+                kind: dto.kind,
+                accountId: dto.accountId ?? null,
+                cardId: dto.cardId ?? null,
+                entryDate: incomingDate,
+                amountPaise,
+                note: dto.note ?? null,
+                parentId: dto.parentId ?? null,
+                updatedAt: new Date(dto.updatedAt ?? Date.now()),
+                deletedAt: incomingDeletedAt,
+                version: Math.max(dto.version ?? existing.version, existing.version) + 1,
+              },
             },
-          });
+          };
+        } else {
+          return {
+            type: 'write',
+            write: {
+              action: 'create' as const,
+              id: dto.id,
+              data: {
+                id: dto.id,
+                householdId,
+                categoryId: categoryId,
+                kind: dto.kind,
+                accountId: dto.accountId ?? null,
+                cardId: dto.cardId ?? null,
+                entryDate: incomingDate,
+                amountPaise,
+                note: dto.note ?? null,
+                parentId: dto.parentId ?? null,
+                createdBy: userId,
+                version: dto.version ?? 1,
+                createdAt: new Date(dto.createdAt ?? Date.now()),
+                updatedAt: new Date(dto.updatedAt ?? Date.now()),
+                deletedAt: incomingDeletedAt,
+              },
+            },
+          };
         }
       }),
     );
 
     results.forEach((r, idx) => {
-      if (r.status === 'rejected') {
-        console.error(`Failed to upsert entry ${entries[idx]?.id}:`, (r as PromiseRejectedResult).reason);
+      if (r.status === 'fulfilled') {
+        syncedCount++;
+        if (r.value.type === 'write') {
+          validWrites.push(r.value.write);
+        }
+      } else {
+        failedCount++;
+        console.error(`Failed to validate entry ${entries[idx]?.id}:`, (r as PromiseRejectedResult).reason);
       }
     });
 
     return {
-      synced: results.filter((r) => r.status === 'fulfilled').length,
-      failed: results.filter((r) => r.status === 'rejected').length,
+      validWrites,
+      neededCategories,
+      syncedCount,
+      failedCount,
+    };
+  }
+
+  /**
+   * Phase 2: Execute valid entry writes in a transactional client.
+   */
+  async applyBatch(
+    householdId: string,
+    validWrites: ValidEntryWrite[],
+    neededCategories: Map<string, { kind: string; name: string }>,
+    userId: string,
+    tx: any,
+  ) {
+    // Ensure default categories exist for this household if missing
+    const catCount = await tx.category.count({ where: { householdId } });
+    if (catCount === 0) {
+      try {
+        const data = seedCategories.map((c) => ({
+          id: `${householdId}-${c.id}`,
+          householdId,
+          kind: c.kind,
+          groupCode: c.groupCode ?? null,
+          name: c.name,
+          needOrWant: c.needOrWant ?? null,
+          isDeduction: c.isDeduction,
+          isSystem: c.isSystem,
+          sortOrder: c.sortOrder,
+        }));
+        await tx.category.createMany({
+          data,
+          skipDuplicates: true,
+        });
+      } catch (e) {
+        console.error('Failed to auto-seed categories in applyBatch:', e);
+      }
+    }
+
+    // Ensure all needed categories exist in DB using upsert (atomic and collision-free).
+    const systemCategoryData = new Map(buildSystemCategoriesForHousehold(householdId).map((c) => [c.id, c]));
+    for (const [catId, info] of neededCategories.entries()) {
+      try {
+        const existingCat = await tx.category.findUnique({ where: { id: catId } });
+        if (existingCat) continue;
+        await tx.category.upsert({
+          where: { id: catId },
+          create: systemCategoryData.get(catId) ?? {
+            id: catId,
+            householdId,
+            kind: info.kind,
+            name: info.name,
+            sortOrder: 999,
+          },
+          update: {},
+        });
+      } catch (_) {
+        // Safe to ignore if already created
+      }
+    }
+
+    for (const item of validWrites) {
+      if (item.action === 'create') {
+        await tx.entry.create({ data: item.data });
+      } else {
+        await tx.entry.update({ where: { id: item.id }, data: item.data });
+      }
+    }
+  }
+
+  /**
+   * Upsert a batch of entries — idempotent sync (doc 07 POST /sync/batch).
+   * Validates in Phase 1 without writing, then writes in Phase 2 inside a transaction.
+   */
+  async upsertBatch(householdId: string, entries: CreateEntryDto[], userId: string, tx?: any) {
+    const validation = await this.validateBatch(householdId, entries, userId);
+
+    if (validation.validWrites.length > 0) {
+      if (tx) {
+        await this.applyBatch(householdId, validation.validWrites, validation.neededCategories, userId, tx);
+      } else {
+        const runner = this.prisma?.$transaction
+          ? (fn: any) => this.prisma.$transaction(fn, { timeout: 45000, maxWait: 10000 })
+          : (fn: any) => fn(this.prisma);
+        await runner(async (innerTx: any) => {
+          await this.applyBatch(householdId, validation.validWrites, validation.neededCategories, userId, innerTx);
+        });
+      }
+    }
+
+    return {
+      synced: validation.syncedCount,
+      failed: validation.failedCount,
     };
   }
 

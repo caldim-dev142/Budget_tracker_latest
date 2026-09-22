@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
+import * as Sentry from '@sentry/nestjs';
 
 /**
  * Phase 5 — Global Structured Exception Filter
@@ -51,11 +52,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     }
 
+    // Capture 5xx server errors and unhandled exceptions in Sentry.
+    // Client errors (4xx validation, 401, 403, 404) are ignored to avoid noise.
+    if (status >= 500 && process.env.SENTRY_DSN) {
+      try {
+        Sentry.captureException(exception);
+      } catch (err) {
+        // Fail-safe: Sentry error capture failure must never disrupt the response flow or throw.
+        this.logger.warn(`Failed to capture exception in Sentry: ${(err as Error)?.message}`);
+      }
+    }
+
+    const requestId =
+      (request as any)?.id ||
+      (request?.headers && (request.headers['x-request-id'] || request.headers['request-id'])) ||
+      '';
+
     const payload = {
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request?.url || '',
       method: request?.method || '',
+      requestId,
       error,
       message,
     };

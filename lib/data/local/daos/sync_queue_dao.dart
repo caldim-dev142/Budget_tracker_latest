@@ -112,4 +112,18 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase> with _$SyncQueueDaoMixi
       ..where(syncQueueTable.syncedAt.isNull());
     return query.map((row) => row.read(count)!).getSingle();
   }
+
+  /// Live count of queued-but-unsynced operations.
+  ///
+  /// Used by the sync-health UI so a growing backlog becomes visible instead of
+  /// silent. pendingCount() previously existed but had ZERO callers anywhere in
+  /// the app, which is why a user could accumulate weeks of unsynced changes
+  /// with nothing on screen ever hinting at it.
+  Stream<int> watchPendingCount() {
+    final count = syncQueueTable.id.count();
+    final query = selectOnly(syncQueueTable)
+      ..addColumns([count])
+      ..where(syncQueueTable.syncedAt.isNull());
+    return query.map((row) => row.read(count) ?? 0).watchSingle();
+  }
 }

@@ -1092,9 +1092,8 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       stillPending = await db.syncQueueDao.pendingCount();
       // Only push if there are actual pending items to push, with a tight timeout
       if (stillPending > 0 && !force) {
-        await _ref.read(syncServiceProvider).syncAllQueue().timeout(
-          const Duration(seconds: 4),
-          onTimeout: () => 0,
+        await _ref.read(syncServiceProvider).syncAllQueue(
+          timeout: const Duration(seconds: 4),
         );
         stillPending = await db.syncQueueDao.pendingCount();
       }
@@ -1102,6 +1101,8 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       stillPending = force ? 0 : 1;
     }
 
+    // Cancel any in-flight sync so it cannot execute or write after credentials are cleared
+    _ref.read(syncServiceProvider).cancelCurrentSync('User logged out');
     await _signOutSession();
 
     if (stillPending > 0 && !force) {

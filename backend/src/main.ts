@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import './common/bigint-json';
+import * as Sentry from '@sentry/nestjs';
+import { scrubSentryEvent } from './common/sentry/sentry.scrubber';
+import { generateRequestId } from './common/utils/request-id.util';
 import { NestFactory } from '@nestjs/core';
 import {
   FastifyAdapter,
@@ -12,11 +15,54 @@ import { parse as parseQueryString } from 'querystring';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
+// Sentry initialization — must happen as early as possible before Nest app creation.
+// If SENTRY_DSN is unset (local dev, CI), Sentry cleanly no-ops without error.
+if (process.env.SENTRY_DSN) {
+  try {
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
+      sendDefaultPii: false,
+      beforeSend: scrubSentryEvent,
+    });
+  } catch (err) {
+    // Fail-safe: Sentry initialization error must never crash or block server startup.
+    console.error('[Sentry] Initialization failed:', err);
+  }
+}
+
 async function bootstrap() {
+  const logLevel =
+    process.env.LOG_LEVEL ||
+    (process.env.NODE_ENV === 'development' ? 'debug' : 'info');
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      logger: process.env.NODE_ENV === 'development',
+      logger: {
+        level: logLevel,
+        redact: {
+          paths: [
+            'req.headers.authorization',
+            'req.headers.cookie',
+            'req.body',
+            'res.headers["set-cookie"]',
+          ],
+          remove: true,
+        },
+        serializers: {
+          req(req: any) {
+            return {
+              id: req.id,
+              method: req.method,
+              url: req.url,
+            };
+          },
+        },
+      },
+      disableRequestLogging: true,
+      requestIdHeader: 'x-request-id',
+      genReqId: generateRequestId,
       // SECURITY: behind a reverse proxy (Nginx, a tunnel, a load balancer)
       // every request arrives from the proxy's IP, so rate limiting would
       // become a single global bucket instead of per-client. trustProxy makes
@@ -31,6 +77,10 @@ async function bootstrap() {
     // with the empty-body-tolerant parser and abort bootstrap with FST_ERR_CTP_ALREADY_PRESENT).
     { bodyParser: false },
   );
+
+  // Enable shutdown hooks so Nest catches termination signals (SIGTERM, SIGINT),
+  // closes Fastify HTTP listener to drain in-flight requests, and calls OnModuleDestroy.
+  app.enableShutdownHooks();
 
   // Global exception filter for structured JSON error responses
   app.useGlobalFilters(new HttpExceptionFilter());
@@ -87,6 +137,9 @@ async function bootstrap() {
 
   fastifyInstance.addHook('onRequest', (request: any, reply: any, done: () => void) => {
     request.rawStartTime = Date.now();
+    if (request.id) {
+      reply.header('x-request-id', request.id);
+    }
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'SAMEORIGIN');
     reply.header('X-XSS-Protection', '1; mode=block');
@@ -115,7 +168,16 @@ async function bootstrap() {
   fastifyInstance.addHook('onResponse', (request: any, reply: any, done: () => void) => {
     const duration = Date.now() - (request.rawStartTime || Date.now());
     if (request.url !== '/health') {
-      console.log(`[HTTP] ${request.method} ${request.url} ${reply.statusCode} - ${duration}ms`);
+      request.log.info(
+        {
+          reqId: request.id,
+          method: request.method,
+          url: request.url,
+          statusCode: reply.statusCode,
+          durationMs: duration,
+        },
+        `[HTTP] ${request.method} ${request.url} ${reply.statusCode} - ${duration}ms`,
+      );
     }
     done();
   });

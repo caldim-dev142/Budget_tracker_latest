@@ -45,17 +45,30 @@ export class AuthService {
       const userId = uuidv4();
       const householdId = uuidv4();
 
-      user = await this.prisma.user.create({
-        data: {
-          id: userId,
-          email,
-          displayName,
-          household_id: householdId,
-          auth_provider: 'google',
-        },
-      });
+      user = await this.prisma.$transaction(async (tx) => {
+        await tx.household.create({
+          data: {
+            id: householdId,
+            name: `${displayName}'s Household`,
+            ownerId: userId,
+          },
+        });
 
-      await this.ensureHouseholdAndDefaults(userId, householdId, displayName);
+        const createdUser = await tx.user.create({
+          data: {
+            id: userId,
+            email,
+            displayName,
+            household_id: householdId,
+            auth_provider: 'google',
+          },
+        });
+
+        await this.seedCategoriesForHousehold(householdId, tx);
+        await this.seedSystemCategoriesForHousehold(householdId, tx);
+
+        return createdUser;
+      });
     } else if (user.household_id) {
       await this.ensureHouseholdAndDefaults(user.id, user.household_id, user.displayName);
     }
@@ -93,23 +106,36 @@ export class AuthService {
 
     let user;
     try {
-      user = await this.prisma.user.create({
-      data: {
-        id: userId,
-        email,
-        password: passwordHash,
-        displayName: dto.displayName,
-        household_id: householdId,
-        auth_provider: 'email',
-      },
+      user = await this.prisma.$transaction(async (tx) => {
+        await tx.household.create({
+          data: {
+            id: householdId,
+            name: householdName,
+            ownerId: userId,
+          },
+        });
+
+        const createdUser = await tx.user.create({
+          data: {
+            id: userId,
+            email,
+            password: passwordHash,
+            displayName: dto.displayName,
+            household_id: householdId,
+            auth_provider: 'email',
+          },
+        });
+
+        await this.seedCategoriesForHousehold(householdId, tx);
+        await this.seedSystemCategoriesForHousehold(householdId, tx);
+
+        return createdUser;
       });
     } catch (e: any) {
       // users.email is unique: a concurrent registration for the same address loses the race.
       if (e?.code === 'P2002') throw new ConflictException('Email already registered.');
       throw e;
     }
-
-    await this.ensureHouseholdAndDefaults(userId, householdId, dto.displayName, householdName);
 
     const tokens = await this.issueTokens(user.id, householdId);
     return {
@@ -276,13 +302,15 @@ export class AuthService {
     householdId: string,
     displayName: string,
     householdName?: string,
+    tx?: any,
   ) {
+    const client = tx ?? this.prisma;
     const name =
       householdName && householdName.trim().length > 0
         ? householdName.trim()
         : `${displayName}'s Household`;
 
-    await this.prisma.household.upsert({
+    await client.household.upsert({
       where: { id: householdId },
       create: {
         id: householdId,
@@ -292,31 +320,28 @@ export class AuthService {
       update: {},
     });
 
-    await this.seedCategoriesForHousehold(householdId);
-    await this.seedSystemCategoriesForHousehold(householdId);
+    await this.seedCategoriesForHousehold(householdId, client);
+    await this.seedSystemCategoriesForHousehold(householdId, client);
   }
 
-  private async seedCategoriesForHousehold(householdId: string) {
-    try {
-      const data = seedCategories.map((c) => ({
-        id: `${householdId}-${c.id}`,
-        householdId,
-        kind: c.kind,
-        groupCode: c.groupCode ?? null,
-        name: c.name,
-        needOrWant: c.needOrWant ?? null,
-        isDeduction: c.isDeduction,
-        isSystem: c.isSystem,
-        sortOrder: c.sortOrder,
-      }));
+  async seedCategoriesForHousehold(householdId: string, tx?: any) {
+    const client = tx ?? this.prisma;
+    const data = seedCategories.map((c) => ({
+      id: `${householdId}-${c.id}`,
+      householdId,
+      kind: c.kind,
+      groupCode: c.groupCode ?? null,
+      name: c.name,
+      needOrWant: c.needOrWant ?? null,
+      isDeduction: c.isDeduction,
+      isSystem: c.isSystem,
+      sortOrder: c.sortOrder,
+    }));
 
-      await this.prisma.category.createMany({
-        data,
-        skipDuplicates: true,
-      });
-    } catch (e) {
-      console.error(`Failed to seed categories for household ${householdId}:`, e);
-    }
+    await client.category.createMany({
+      data,
+      skipDuplicates: true,
+    });
   }
 
   /**
@@ -324,16 +349,13 @@ export class AuthService {
    * These are created with isSystem=true and never appear in the user-facing category picker.
    * Idempotent — safe to call on every login (skipDuplicates).
    */
-  private async seedSystemCategoriesForHousehold(householdId: string) {
-    try {
-      const data = buildSystemCategoriesForHousehold(householdId);
-      await this.prisma.category.createMany({
-        data,
-        skipDuplicates: true,
-      });
-    } catch (e) {
-      console.error(`Failed to seed system categories for household ${householdId}:`, e);
-    }
+  async seedSystemCategoriesForHousehold(householdId: string, tx?: any) {
+    const client = tx ?? this.prisma;
+    const data = buildSystemCategoriesForHousehold(householdId);
+    await client.category.createMany({
+      data,
+      skipDuplicates: true,
+    });
   }
 
   /**

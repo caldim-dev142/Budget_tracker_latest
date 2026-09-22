@@ -21,6 +21,7 @@ import { MonthsModule } from './months/months.module';
 import { ReportsModule } from './reports/reports.module';
 import { SyncModule } from './sync/sync.module';
 import { EngineModule } from './engine/engine.module';
+import { CleanupModule } from './common/jobs/cleanup.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { EngineModule } from './engine/engine.module';
     ReportsModule,
     SyncModule,
     EngineModule,
+    CleanupModule,
   ],
   providers: [
     {

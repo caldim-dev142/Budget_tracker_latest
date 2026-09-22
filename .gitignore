@@ -50,6 +50,9 @@ dist/
 .env
 *.env
 !.env.example
+backend/prisma/backups/
+prisma/backups/
+backend/coverage/
 # Android Keystore & Signing Secrets
 key.properties
 **/key.properties

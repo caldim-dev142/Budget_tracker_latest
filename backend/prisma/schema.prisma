@@ -14,6 +14,22 @@ model Household {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  users            User[]
+  categories       Category[]
+  accounts         Account[]
+  entries          Entry[]
+  budgets          Budget[]
+  sinkingFunds     SinkingFund[]
+  savingGoals      SavingGoal[]
+  creditCards      CreditCard[]
+  receivables      Receivable[]
+  plannedBills     PlannedBill[]
+  reserveLines     ReserveLine[]
+  monthSnapshots   MonthSnapshot[]
+  annualTargets    annual_targets[]
+  householdInvites HouseholdInvite[]
+  syncTombstones   SyncTombstone[]
+
   @@map("households")
 }
 
@@ -28,6 +44,7 @@ model HouseholdInvite {
   expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
   usedAt      DateTime? @map("used_at")    @db.Timestamptz(6) // null until redeemed
   usedBy      String?   @map("used_by")   // userId who redeemed this code
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([householdId])
   @@index([code])
@@ -42,11 +59,12 @@ model User {
   household_id  String?
   auth_provider String         @default("email")
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  household     Household?     @relation(fields: [household_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refreshTokens RefreshToken[]
 
+  @@index([household_id])
   @@map("users")
 }
-
 
 model Category {
   id          String    @id
@@ -61,55 +79,72 @@ model Category {
   archivedAt  DateTime? @map("archived_at") @db.Timestamptz(6)
   budgets     Budget[]
   entries     Entry[]
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("categories")
 }
 
 model Account {
-  id                  String  @id @default(uuid())
-  householdId         String  @map("household_id")
+  id                  String    @id @default(uuid())
+  householdId         String    @map("household_id")
   name                String
   type                String
-  currentBalancePaise BigInt     @default(0) @map("current_balance_paise")
-  isActive            Boolean @default(true) @map("is_active")
-  sortOrder           Int     @default(0) @map("sort_order")
+  currentBalancePaise BigInt    @default(0) @map("current_balance_paise")
+  isActive            Boolean   @default(true) @map("is_active")
+  sortOrder           Int       @default(0) @map("sort_order")
+  entries             Entry[]
+  household           Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("accounts")
 }
 
 model Entry {
-  id          String    @id
-  householdId String    @map("household_id")
-  categoryId  String    @map("category_id")
+  id          String      @id
+  householdId String      @map("household_id")
+  categoryId  String      @map("category_id")
   kind        String
-  accountId   String?   @map("account_id")
-  cardId      String?   @map("card_id")
-  entryDate   DateTime  @map("entry_date") @db.Timestamptz(6)
-  amountPaise BigInt       @map("amount_paise")
+  accountId   String?     @map("account_id")
+  cardId      String?     @map("card_id")
+  entryDate   DateTime    @map("entry_date") @db.Timestamptz(6)
+  amountPaise BigInt      @map("amount_paise")
   note        String?
-  parentId    String?   @map("parent_id")
-  createdBy   String    @map("created_by")
-  version     Int       @default(1)
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  parentId    String?     @map("parent_id")
+  createdBy   String      @map("created_by")
+  version     Int         @default(1)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?   @map("deleted_at") @db.Timestamptz(6)
   /// onDelete: Restrict — category deletion must never silently remove historical financial entries.
   /// To remove a category, archive it (set archivedAt) rather than deleting it.
-  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  household   Household   @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  account     Account?    @relation(fields: [accountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  card        CreditCard? @relation(fields: [cardId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  parent      Entry?      @relation("EntrySplits", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  splits      Entry[]     @relation("EntrySplits")
 
+  @@index([householdId])
+  @@index([accountId])
+  @@index([cardId])
+  @@index([parentId])
   @@map("entries")
 }
 
 model Budget {
-  id          String   @id @default(uuid())
-  householdId String   @map("household_id")
-  categoryId  String   @map("category_id")
-  yearMonth   String   @map("year_month")
-  amountPaise BigInt      @default(0) @map("amount_paise")
+  id          String    @id @default(uuid())
+  householdId String    @map("household_id")
+  categoryId  String    @map("category_id")
+  yearMonth   String    @map("year_month")
+  amountPaise BigInt    @default(0) @map("amount_paise")
   /// onDelete: Restrict — protect budget rows from silent category deletion.
-  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([categoryId, yearMonth])
+  @@index([householdId])
+  @@index([householdId, yearMonth])
   @@map("budgets")
 }
 
@@ -117,10 +152,12 @@ model SinkingFund {
   id                  String         @id @default(uuid())
   householdId         String         @map("household_id")
   name                String
-  openingReservePaise BigInt            @default(0) @map("opening_reserve_paise")
+  openingReservePaise BigInt         @default(0) @map("opening_reserve_paise")
   archivedAt          DateTime?      @map("archived_at") @db.Timestamptz(6)
   movements           FundMovement[]
+  household           Household      @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("sinking_funds")
 }
 
@@ -128,11 +165,12 @@ model FundMovement {
   id           String      @id @default(uuid())
   fundId       String      @map("fund_id")
   type         String
-  amountPaise  BigInt         @map("amount_paise")
+  amountPaise  BigInt      @map("amount_paise")
   movementDate DateTime    @map("movement_date") @db.Timestamptz(6)
   note         String?
   fund         SinkingFund @relation(fields: [fundId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@index([fundId])
   @@map("fund_movements")
 }
 
@@ -141,22 +179,25 @@ model SavingGoal {
   householdId        String             @map("household_id")
   bucket             String
   name               String
-  targetPaise        BigInt?               @map("target_paise")
-  monthlyBudgetPaise BigInt                @default(0) @map("monthly_budget_paise")
+  targetPaise        BigInt?            @map("target_paise")
+  monthlyBudgetPaise BigInt             @default(0) @map("monthly_budget_paise")
   archivedAt         DateTime?          @map("archived_at") @db.Timestamptz(6)
   contributions      GoalContribution[]
+  household          Household          @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("saving_goals")
 }
 
 model GoalContribution {
   id               String     @id @default(uuid())
   goalId           String     @map("goal_id")
-  amountPaise      BigInt        @map("amount_paise")
+  amountPaise      BigInt     @map("amount_paise")
   contributionDate DateTime   @map("contribution_date") @db.Timestamptz(6)
   note             String?
   goal             SavingGoal @relation(fields: [goalId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@index([goalId])
   @@map("goal_contributions")
 }
 
@@ -164,10 +205,13 @@ model CreditCard {
   id                       String            @id @default(uuid())
   householdId              String            @map("household_id")
   name                     String
-  previousOutstandingPaise BigInt               @default(0) @map("previous_outstanding_paise")
+  previousOutstandingPaise BigInt            @default(0) @map("previous_outstanding_paise")
   isActive                 Boolean           @default(true) @map("is_active")
   transactions             CardTransaction[]
+  entries                  Entry[]
+  household                Household         @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("credit_cards")
 }
 
@@ -176,10 +220,11 @@ model CardTransaction {
   cardId      String     @map("card_id")
   txnDate     DateTime   @map("txn_date") @db.Timestamptz(6)
   description String
-  amountPaise BigInt        @map("amount_paise")
+  amountPaise BigInt     @map("amount_paise")
   sNo         Int?       @map("s_no")
   card        CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@index([cardId])
   @@map("card_transactions")
 }
 
@@ -187,11 +232,13 @@ model Receivable {
   id          String    @id @default(uuid())
   householdId String    @map("household_id")
   personName  String    @map("person_name")
-  amountPaise BigInt       @map("amount_paise")
+  amountPaise BigInt    @map("amount_paise")
   status      String    @default("open")
   dueDate     DateTime? @map("due_date") @db.Timestamptz(6)
   entry_id    String?
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("receivables")
 }
 
@@ -199,22 +246,27 @@ model PlannedBill {
   id          String    @id @default(uuid())
   householdId String    @map("household_id")
   name        String
-  amountPaise BigInt       @map("amount_paise")
+  amountPaise BigInt    @map("amount_paise")
   dueDate     DateTime? @map("due_date") @db.Timestamptz(6)
   isPaid      Boolean   @default(false) @map("is_paid")
   entry_id    String?
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
   @@map("planned_bills")
 }
 
 model ReserveLine {
-  id          String @id @default(uuid())
-  householdId String @map("household_id")
-  yearMonth   String @map("year_month")
+  id          String    @id @default(uuid())
+  householdId String    @map("household_id")
+  yearMonth   String    @map("year_month")
   name        String
   amountPaise BigInt    @map("amount_paise")
-  source      String @default("manual")
+  source      String    @default("manual")
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@index([householdId])
+  @@index([householdId, yearMonth])
   @@map("reserve_lines")
 }
 
@@ -222,22 +274,24 @@ model MonthSnapshot {
   id                     String    @id @default(uuid())
   householdId            String    @map("household_id")
   yearMonth              String    @map("year_month")
-  openingBalancePaise    BigInt       @default(0) @map("opening_balance_paise")
-  lastMonthReservesPaise BigInt       @default(0) @map("last_month_reserves_paise")
-  incomePaise            BigInt       @default(0) @map("income_paise")
-  adjustmentsPaise       BigInt       @default(0) @map("adjustments_paise")
-  spendingPaise          BigInt       @default(0) @map("spending_paise")
-  protectionPaise        BigInt       @default(0) @map("protection_paise")
-  savingPaise            BigInt       @default(0) @map("saving_paise")
-  reservesPaise          BigInt       @default(0) @map("reserves_paise")
-  closingBalancePaise    BigInt       @default(0) @map("closing_balance_paise")
-  remainingPaise         BigInt       @default(0) @map("remaining_paise")
+  openingBalancePaise    BigInt    @default(0) @map("opening_balance_paise")
+  lastMonthReservesPaise BigInt    @default(0) @map("last_month_reserves_paise")
+  incomePaise            BigInt    @default(0) @map("income_paise")
+  adjustmentsPaise       BigInt    @default(0) @map("adjustments_paise")
+  spendingPaise          BigInt    @default(0) @map("spending_paise")
+  protectionPaise        BigInt    @default(0) @map("protection_paise")
+  savingPaise            BigInt    @default(0) @map("saving_paise")
+  reservesPaise          BigInt    @default(0) @map("reserves_paise")
+  closingBalancePaise    BigInt    @default(0) @map("closing_balance_paise")
+  remainingPaise         BigInt    @default(0) @map("remaining_paise")
   status                 String    @default("open")
   closedAt               DateTime? @map("closed_at") @db.Timestamptz(6)
   /// Last close or reopen time; lets other devices order status changes (DEF-SYNC-07).
   statusChangedAt        DateTime? @map("status_changed_at") @db.Timestamptz(6)
+  household              Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([householdId, yearMonth])
+  @@index([householdId])
   @@map("month_snapshots")
 }
 
@@ -261,11 +315,14 @@ model RefreshToken {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model annual_targets {
-  id           String @id
+  id           String    @id
   household_id String
   title        String
   target_paise BigInt
-  type         String @default("income")
+  type         String    @default("income")
+  household    Household @relation(fields: [household_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([household_id])
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -285,11 +342,12 @@ model sync_queue {
 /// fund movements, annual targets, categories). A tombstone prevents a stale device from
 /// re-creating the record and is returned by GET /sync/pull so other devices delete it locally.
 model SyncTombstone {
-  id          String   @id @default(uuid())
-  householdId String   @map("household_id")
+  id          String    @id @default(uuid())
+  householdId String    @map("household_id")
   entity      String
-  entityId    String   @map("entity_id")
-  deletedAt   DateTime @default(now()) @map("deleted_at") @db.Timestamptz(6)
+  entityId    String    @map("entity_id")
+  deletedAt   DateTime  @default(now()) @map("deleted_at") @db.Timestamptz(6)
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([entity, entityId])
   @@index([householdId])

@@ -42,7 +42,7 @@ export class MonthsService {
 
   /**
    * Close a month: freeze actuals derived from real DB entries, compute closing balance,
-   * and initialize next month opening. Idempotent (doc 06 §4).
+   * and initialize next month opening. Idempotent (doc 06 ï¿½4).
    * Fix: update branch now freezes ALL actuals (previously only set status + closedAt).
    */
   async closeMonth(
@@ -153,26 +153,35 @@ export class MonthsService {
       statusChangedAt:        new Date(),
     };
 
-    const snapshot = await this.prisma.monthSnapshot.upsert({
-      where:  { householdId_yearMonth: { householdId, yearMonth } },
-      create: { householdId, yearMonth, ...frozenData },
-      update: frozenData,
-    });
-
     const nextYm = this.getNextYearMonth(yearMonth);
-    const nextSnap = await this.prisma.monthSnapshot.findUnique({
-      where: { householdId_yearMonth: { householdId, yearMonth: nextYm } },
-      select: { status: true },
-    });
-    // Only a missing or open next month is (re)seeded. A closed month is frozen and must never be
-    // mutated by re-closing an earlier month; reopen it first if the rollover must be applied again.
-    if (!nextSnap || nextSnap.status !== 'closed') {
-      await this.prisma.monthSnapshot.upsert({
-        where:  { householdId_yearMonth: { householdId, yearMonth: nextYm } },
-        create: { householdId, yearMonth: nextYm, openingBalancePaise: closingBalance, lastMonthReservesPaise: totalReserves, status: 'open' },
-        update: { openingBalancePaise: closingBalance, lastMonthReservesPaise: totalReserves },
+
+    const runner = this.prisma?.$transaction
+      ? (fn: any) => this.prisma.$transaction(fn, { timeout: 30000, maxWait: 10000 })
+      : (fn: any) => fn(this.prisma);
+
+    const snapshot = await runner(async (tx: any) => {
+      const snap = await tx.monthSnapshot.upsert({
+        where:  { householdId_yearMonth: { householdId, yearMonth } },
+        create: { householdId, yearMonth, ...frozenData },
+        update: frozenData,
       });
-    }
+
+      const nextSnap = await tx.monthSnapshot.findUnique({
+        where: { householdId_yearMonth: { householdId, yearMonth: nextYm } },
+        select: { status: true },
+      });
+      // Only a missing or open next month is (re)seeded. A closed month is frozen and must never be
+      // mutated by re-closing an earlier month; reopen it first if the rollover must be applied again.
+      if (!nextSnap || nextSnap.status !== 'closed') {
+        await tx.monthSnapshot.upsert({
+          where:  { householdId_yearMonth: { householdId, yearMonth: nextYm } },
+          create: { householdId, yearMonth: nextYm, openingBalancePaise: closingBalance, lastMonthReservesPaise: totalReserves, status: 'open' },
+          update: { openingBalancePaise: closingBalance, lastMonthReservesPaise: totalReserves },
+        });
+      }
+
+      return snap;
+    });
 
     return toSnapshotResponse(snapshot);
   }

@@ -1,6 +1,8 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Req } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Req, Res, Inject } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { PrismaClient } from '@prisma/client';
+import { FastifyReply } from 'fastify';
 
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -12,16 +14,32 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    @Inject('PRISMA') private readonly prisma?: PrismaClient,
+  ) {}
 
   @Get('health')
   @ApiOperation({ summary: 'Health and DB connectivity check' })
-  health() {
-    return {
-      status: 'ok',
-      service: 'budget-tracker-backend',
-      timestamp: new Date().toISOString(),
-    };
+  @ApiResponse({ status: 200, description: 'Application and database are healthy' })
+  @ApiResponse({ status: 503, description: 'Database is unreachable' })
+  async health(@Res({ passthrough: true }) res?: FastifyReply) {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return {
+        status: 'ok',
+        db: 'ok',
+        service: 'budget-tracker-backend',
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      res?.status(HttpStatus.SERVICE_UNAVAILABLE);
+      return {
+        status: 'error',
+        db: 'unreachable',
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   @Post('register')
