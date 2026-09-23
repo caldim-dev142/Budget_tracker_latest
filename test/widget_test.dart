@@ -28,5 +28,8 @@ void main() {
 
     // Verify app router loads the main screen (which could be the loading or onboarding/dashboard)
     expect(find.byType(MaterialApp), findsOneWidget);
+
+    await db.close();
+    await tester.pump(const Duration(milliseconds: 100));
   });
 }

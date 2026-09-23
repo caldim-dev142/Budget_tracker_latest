@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:flutter/foundation.dart' show kReleaseMode, kDebugMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -175,16 +175,18 @@ class SettingsScreen extends ConsumerWidget {
           // reinstall the app.
           const _BackupStatusBanner(),
 
-          // Server Connection
-          const SizedBox(height: 12),
-          const _SectionHeader('Server Connection'),
-          _SettingsTile(
-            icon: Icons.cloud_queue_outlined,
-            title: 'Backend Server URL',
-            subtitle: ref.watch(serverUrlProvider),
-            trailing: const Icon(Icons.edit_outlined, size: 18),
-            onTap: () => _showServerUrlDialog(context, ref),
-          ),
+          if (kDebugMode) ...[
+            // Server Connection
+            const SizedBox(height: 12),
+            const _SectionHeader('Server Connection'),
+            _SettingsTile(
+              icon: Icons.cloud_queue_outlined,
+              title: 'Backend Server URL',
+              subtitle: ref.watch(serverUrlProvider),
+              trailing: const Icon(Icons.edit_outlined, size: 18),
+              onTap: () => _showServerUrlDialog(context, ref),
+            ),
+          ],
 
           // Security
           const SizedBox(height: 12),
