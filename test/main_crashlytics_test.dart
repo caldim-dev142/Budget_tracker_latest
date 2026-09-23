@@ -5,6 +5,9 @@
 // because setupErrorHooks accepts plain callbacks, allowing the test to supply
 // lightweight fakes.
 
+// ignore: unnecessary_import — ErrorCallback and PlatformDispatcher are
+// defined in dart:ui; flutter/material.dart re-exports them in some
+// environments but not all, so the explicit import is kept for safety.
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
