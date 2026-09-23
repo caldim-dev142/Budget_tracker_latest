@@ -27,7 +27,10 @@ bool isLoopbackHost(String host) =>
     host == 'localhost' ||
     host == '127.0.0.1' ||
     host == '::1' ||
-    host == '10.0.2.2';
+    host == '10.0.2.2' ||
+    host.startsWith('192.168.') ||
+    host.startsWith('10.') ||
+    RegExp(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.').hasMatch(host);
 
 /// Blocks plaintext HTTP requests in release builds.
 ///
