@@ -121,6 +121,34 @@ describe('DEF-FIN-02 — lending system category id normalisation (₹7,000 regr
     expect(normalizeCategoryId(`return-received-system-cat-${HH}`, HH)).toBe(`${HH}-return-received-system-cat`);
     expect(normalizeCategoryId('spd-n05', HH)).toBe(`${HH}-spd-n05`);
     expect(normalizeCategoryId('custom-x', HH)).toBe('custom-x');
+    expect(normalizeCategoryId('cat-1790170089030', HH)).toBe('cat-1790170089030');
+  });
+
+  it('allow-list: prepends householdId only to known seed category prefixes, leaving UUIDs and custom IDs untouched', () => {
+    // 1. Known seed prefixes (from category_seed.dart / categories-seed.data.ts)
+    expect(normalizeCategoryId('inc-01', HH)).toBe(`${HH}-inc-01`);
+    expect(normalizeCategoryId('ded-01', HH)).toBe(`${HH}-ded-01`);
+    expect(normalizeCategoryId('adj-05', HH)).toBe(`${HH}-adj-05`);
+    expect(normalizeCategoryId('spd-n05', HH)).toBe(`${HH}-spd-n05`);
+    expect(normalizeCategoryId('pro-i01', HH)).toBe(`${HH}-pro-i01`);
+    expect(normalizeCategoryId('sav-r01', HH)).toBe(`${HH}-sav-r01`);
+
+    // 2. Already-prefixed seed categories (idempotence)
+    expect(normalizeCategoryId(`${HH}-spd-n05`, HH)).toBe(`${HH}-spd-n05`);
+    expect(normalizeCategoryId(`${HH}-inc-01`, HH)).toBe(`${HH}-inc-01`);
+
+    // 3. Bare UUID categories (produced by saving_screen.dart and protection_screen.dart via _uuid.v4())
+    const savingGoalCatUuid = 'c8b411d7-2f3b-4c5a-8e2b-1a2b3c4d5e6f';
+    const protectionCatUuid = '7e6a5b4c-3d2e-1f0a-9b8c-7d6e5f4a3b2c';
+    expect(normalizeCategoryId(savingGoalCatUuid, HH)).toBe(savingGoalCatUuid);
+    expect(normalizeCategoryId(protectionCatUuid, HH)).toBe(protectionCatUuid);
+
+    // 4. Custom categories ('custom-*' and 'cat-*')
+    expect(normalizeCategoryId('custom-1790170089030', HH)).toBe('custom-1790170089030');
+    expect(normalizeCategoryId('cat-1790170089030', HH)).toBe('cat-1790170089030');
+
+    // 5. Future / arbitrary custom category format
+    expect(normalizeCategoryId('future-arbitrary-category-id', HH)).toBe('future-arbitrary-category-id');
   });
 
   it('a ₹7,000 lend entry (positive amount, as borrow_lend_dao sends it) is stored against the canonical deduction category so net adjustments = -700000', async () => {

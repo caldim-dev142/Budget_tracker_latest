@@ -89,15 +89,43 @@ export class SyncService {
     // 0. Categories
     const categoriesToUpsert: SyncCategoryDto[] = [];
     if (dto.categories && dto.categories.length > 0) {
-      for (const cat of dto.categories) {
-        if (tombstones.has(tombKey('category', cat.id))) continue;
-        if (isClientSystemCategoryId(cat.id, householdId)) continue;
-
-        const existingCat = await this.prisma.category.findUnique({ where: { id: cat.id } });
-        if (existingCat && existingCat.householdId !== householdId) {
-          throw new ForbiddenException(`Category ${cat.id} belongs to a different household.`);
+      const candidates = dto.categories.filter(
+        (cat) => !tombstones.has(tombKey('category', cat.id)) && !isClientSystemCategoryId(cat.id, householdId),
+      );
+      if (candidates.length > 0) {
+        const existingCats = await this.prisma.category.findMany({
+          where: { id: { in: candidates.map((c) => c.id) } },
+          select: {
+            id: true,
+            householdId: true,
+            kind: true,
+            groupCode: true,
+            name: true,
+            needOrWant: true,
+            isDeduction: true,
+            isSystem: true,
+            sortOrder: true,
+          },
+        });
+        const existingMap = new Map(existingCats.map((c) => [c.id, c]));
+        for (const cat of candidates) {
+          const existingCat = existingMap.get(cat.id);
+          if (existingCat && existingCat.householdId !== householdId) {
+            throw new ForbiddenException(`Category ${cat.id} belongs to a different household.`);
+          }
+          if (
+            !existingCat ||
+            existingCat.kind !== cat.kind ||
+            existingCat.groupCode !== (cat.groupCode ?? null) ||
+            existingCat.name !== cat.name ||
+            existingCat.needOrWant !== (cat.needOrWant ?? null) ||
+            existingCat.isDeduction !== (cat.isDeduction ?? false) ||
+            existingCat.isSystem !== (cat.isSystem ?? false) ||
+            existingCat.sortOrder !== (cat.sortOrder ?? 0)
+          ) {
+            categoriesToUpsert.push(cat);
+          }
         }
-        categoriesToUpsert.push(cat);
       }
     }
 

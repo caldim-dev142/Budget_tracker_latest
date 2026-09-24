@@ -538,8 +538,10 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showEditCategoryDialog(BuildContext context, WidgetRef ref, CategoriesTableData cat) {
-    final nameCtrl = TextEditingController(text: cat.name);
-    final groupCtrl = TextEditingController(text: cat.groupCode ?? '');
+    final categoryCtrl = TextEditingController(
+      text: (cat.groupCode != null && cat.groupCode!.isNotEmpty) ? cat.groupCode : cat.name,
+    );
+    final subcatCtrl = TextEditingController(text: cat.name);
     String kind = cat.kind;
     String needOrWant = cat.needOrWant ?? 'need';
 
@@ -547,7 +549,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
-          final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+          final liveIcon = categoryIcon(subcatCtrl.text.isNotEmpty ? subcatCtrl.text : categoryCtrl.text, kind, categoryCtrl.text);
           final liveColor = categoryIconColor(kind);
 
           return AlertDialog(
@@ -588,7 +590,7 @@ class SettingsScreen extends ConsumerWidget {
                                 ),
                               ),
                               Text(
-                                nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                categoryCtrl.text.trim().isEmpty ? 'Type name to generate' : categoryCtrl.text.trim(),
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -601,19 +603,19 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 14),
                   TextField(
-                    controller: nameCtrl,
+                    controller: categoryCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Category Name *',
-                      hintText: 'e.g. Groceries, Fuel, Netflix',
+                      labelText: 'Category *',
+                      hintText: 'e.g. Groceries',
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 12),
                   TextField(
-                    controller: groupCtrl,
+                    controller: subcatCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Subcategory / Group',
-                      hintText: 'e.g. Food & Dining, Travel, Bills',
+                      labelText: 'Subcategory',
+                      hintText: 'e.g. Food & Dining',
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
@@ -653,19 +655,22 @@ class SettingsScreen extends ConsumerWidget {
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
               FilledButton(
                 onPressed: () async {
-                  final name = nameCtrl.text.trim();
-                  final group = groupCtrl.text.trim();
-                  if (name.isEmpty) {
+                  final category = categoryCtrl.text.trim();
+                  final subcat = subcatCtrl.text.trim();
+                  if (category.isEmpty) {
                     AppFeedback.showWarning(context, 'Please enter a category name.');
                     return;
                   }
+
+                  final finalGroup = category;
+                  final finalName = subcat.isNotEmpty ? subcat : category;
 
                   try {
                     final db = ref.read(appDatabaseProvider);
                     await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
                         .write(CategoriesTableCompanion(
-                      name: Value(name),
-                      groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
+                      name: Value(finalName),
+                      groupCode: Value(finalGroup),
                       kind: Value(kind),
                       needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
                     ));
@@ -691,8 +696,8 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showAddCategoryDialog(BuildContext context, WidgetRef ref) {
-    final nameCtrl = TextEditingController();
-    final groupCtrl = TextEditingController();
+    final categoryCtrl = TextEditingController();
+    final subcatCtrl = TextEditingController();
     String kind = 'spending';
     String needOrWant = 'need';
 
@@ -701,7 +706,7 @@ class SettingsScreen extends ConsumerWidget {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+            final liveIcon = categoryIcon(subcatCtrl.text.isNotEmpty ? subcatCtrl.text : categoryCtrl.text, kind, categoryCtrl.text);
             final liveColor = categoryIconColor(kind);
 
             return AlertDialog(
@@ -742,7 +747,7 @@ class SettingsScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 Text(
-                                  nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                  categoryCtrl.text.trim().isEmpty ? 'Type name to generate' : categoryCtrl.text.trim(),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -755,19 +760,19 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 14),
                     TextField(
-                      controller: nameCtrl,
+                      controller: categoryCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Category Name *',
-                        hintText: 'e.g. Groceries, Fuel, Netflix',
+                        labelText: 'Category *',
+                        hintText: 'e.g. Groceries',
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: groupCtrl,
+                      controller: subcatCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Subcategory / Group',
-                        hintText: 'e.g. Food & Dining, Travel, Bills',
+                        labelText: 'Subcategory',
+                        hintText: 'e.g. Food & Dining',
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
@@ -810,12 +815,15 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 FilledButton(
                   onPressed: () async {
-                    final name = nameCtrl.text.trim();
-                    final group = groupCtrl.text.trim();
-                    if (name.isEmpty) {
+                    final category = categoryCtrl.text.trim();
+                    final subcat = subcatCtrl.text.trim();
+                    if (category.isEmpty) {
                       AppFeedback.showWarning(context, 'Please enter a category name.');
                       return;
                     }
+
+                    final finalGroup = category;
+                    final finalName = subcat.isNotEmpty ? subcat : category;
 
                     try {
                       final db = ref.read(appDatabaseProvider);
@@ -829,8 +837,8 @@ class SettingsScreen extends ConsumerWidget {
                           id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
                           householdId: householdId,
                           kind: kind,
-                          groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
-                          name: name,
+                          groupCode: Value(finalGroup),
+                          name: finalName,
                           needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
                           isDeduction: const Value(false),
                           isSystem: const Value(false),
@@ -843,7 +851,7 @@ class SettingsScreen extends ConsumerWidget {
                       if (context.mounted) {
                         Navigator.pop(context); // Close add category dialog
                         Navigator.pop(context); // Close bottom sheet
-                        AppFeedback.showSuccess(context, 'Custom category "$name" added!');
+                        AppFeedback.showSuccess(context, 'Custom category "$finalName" added!');
                       }
                     } catch (e) {
                       if (context.mounted) {
@@ -980,7 +988,7 @@ class SettingsScreen extends ConsumerWidget {
     try {
       final outcome = await syncService.syncAllQueue(
         cancelToken: cancelToken,
-        timeout: const Duration(seconds: 30),
+        timeout: const Duration(seconds: 60),
       );
 
       dismissDialog();

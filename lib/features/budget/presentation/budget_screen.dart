@@ -102,18 +102,21 @@ class BudgetScreen extends ConsumerWidget {
   }
 
   void _showAddCategoryDialog(BuildContext context, WidgetRef ref, {String? defaultGroup}) {
-    final nameCtrl = TextEditingController();
-    final groupCtrl = TextEditingController(text: defaultGroup ?? '');
+    final categoryCtrl = TextEditingController(text: defaultGroup ?? '');
+    final subcatCtrl = TextEditingController();
     String kind = ref.read(_selectedKindFilterProvider);
     if (kind == 'all') kind = 'spending';
-    String needOrWant = 'need';
+    String? needOrWant = 'need';
 
     showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+            final currentCategoryText = categoryCtrl.text.trim();
+            final currentSubcategory = subcatCtrl.text.trim();
+
+            final liveIcon = categoryIcon(currentSubcategory.isNotEmpty ? currentSubcategory : currentCategoryText, kind, currentCategoryText);
             final liveColor = categoryIconColor(kind);
 
             return AlertDialog(
@@ -158,7 +161,7 @@ class BudgetScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 Text(
-                                  nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                  categoryCtrl.text.trim().isEmpty ? 'Type name to generate' : categoryCtrl.text.trim(),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -171,7 +174,7 @@ class BudgetScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
-                      initialValue: kind,
+                      value: kind,
                       isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Category Type'),
                       items: const [
@@ -182,43 +185,47 @@ class BudgetScreen extends ConsumerWidget {
                         DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
                       ],
                       onChanged: (v) {
-                        if (v != null) setState(() => kind = v);
+                        if (v != null) {
+                          setState(() {
+                            kind = v;
+                            subcatCtrl.clear();
+                          });
+                        }
                       },
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: nameCtrl,
+                      controller: categoryCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Category Name *',
+                        labelText: 'Category',
                         hintText: 'e.g. Groceries',
                       ),
-                      autofocus: true,
+                      autofocus: defaultGroup == null,
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: groupCtrl,
+                      controller: subcatCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Group / Subcategory *',
+                        labelText: 'Subcategory',
                         hintText: 'e.g. Food & Dining',
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
-                    if (kind == 'spending') ...[
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: needOrWant,
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Classification'),
-                        items: const [
-                          DropdownMenuItem(value: 'need', child: Text('Need')),
-                          DropdownMenuItem(value: 'want', child: Text('Want')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) setState(() => needOrWant = v);
-                        },
-                      ),
-                    ],
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      value: needOrWant,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Classification'),
+                      items: const [
+                        DropdownMenuItem(value: 'need', child: Text('Need')),
+                        DropdownMenuItem(value: 'want', child: Text('Want')),
+                        DropdownMenuItem(value: null, child: Text('— None —')),
+                      ],
+                      onChanged: (v) {
+                        setState(() => needOrWant = v);
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -229,12 +236,15 @@ class BudgetScreen extends ConsumerWidget {
                 ),
                 FilledButton(
                   onPressed: () async {
-                    final name = nameCtrl.text.trim();
-                    final group = groupCtrl.text.trim();
-                    if (name.isEmpty) {
+                    final category = categoryCtrl.text.trim();
+                    final subcat = subcatCtrl.text.trim();
+                    if (category.isEmpty) {
                       AppFeedback.showWarning(context, 'Please enter a category name.');
                       return;
                     }
+
+                    final finalGroup = category;
+                    final finalName = subcat.isNotEmpty ? subcat : category;
 
                     final db = ref.read(appDatabaseProvider);
                     final auth = ref.read(authStateProvider).valueOrNull;
@@ -242,12 +252,14 @@ class BudgetScreen extends ConsumerWidget {
 
                     await db.categoryDao.upsertAll([
                       CategoriesTableCompanion.insert(
-                        id: 'cat-${DateTime.now().millisecondsSinceEpoch}',
+                        id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
                         householdId: householdId,
                         kind: kind,
-                        groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
-                        name: name,
-                        needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                        groupCode: Value(finalGroup),
+                        name: finalName,
+                        needOrWant: (needOrWant != null && needOrWant!.isNotEmpty)
+                            ? Value(needOrWant!)
+                            : const Value.absent(),
                         isDeduction: const Value(false),
                         isSystem: const Value(false),
                         sortOrder: const Value(100),
@@ -258,7 +270,7 @@ class BudgetScreen extends ConsumerWidget {
 
                     if (context.mounted) {
                       Navigator.pop(context);
-                      AppFeedback.showSuccess(context, 'Category "$name" added successfully!');
+                      AppFeedback.showSuccess(context, 'Added "$finalName" under "$finalGroup"!');
                     }
                   },
                   child: const Text('Save'),
@@ -905,17 +917,19 @@ class _BudgetGroupCard extends ConsumerWidget {
   }
 
   void _showEditCategoryDialog(BuildContext context, WidgetRef ref, CategoriesTableData cat) {
-    final nameCtrl = TextEditingController(text: cat.name);
-    final groupCtrl = TextEditingController(text: cat.groupCode ?? '');
+    final categoryCtrl = TextEditingController(
+      text: (cat.groupCode != null && cat.groupCode!.isNotEmpty) ? cat.groupCode : cat.name,
+    );
+    final subcatCtrl = TextEditingController(text: cat.name);
     String kind = cat.kind;
-    String needOrWant = cat.needOrWant ?? 'need';
+    String? needOrWant = cat.needOrWant;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Edit Category'),
+          title: const Text('Edit Category / Subcategory'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -926,8 +940,8 @@ class _BudgetGroupCard extends ConsumerWidget {
                   items: const [
                     DropdownMenuItem(value: 'spending', child: Text('Expense (Spending)')),
                     DropdownMenuItem(value: 'income', child: Text('Income')),
-                    DropdownMenuItem(value: 'protection', child: Text('Protection')),
-                    DropdownMenuItem(value: 'saving', child: Text('Saving')),
+                    DropdownMenuItem(value: 'protection', child: Text('Protection (Insurance/EMI)')),
+                    DropdownMenuItem(value: 'saving', child: Text('Saving & Investment')),
                     DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
                   ],
                   onChanged: (v) {
@@ -936,34 +950,34 @@ class _BudgetGroupCard extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: nameCtrl,
+                  controller: categoryCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Category Name *',
+                    labelText: 'Category *',
                     hintText: 'e.g. Groceries',
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: groupCtrl,
+                  controller: subcatCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Sub Category',
+                    labelText: 'Subcategory',
                     hintText: 'e.g. Food & Dining',
                   ),
                 ),
-                if (kind == 'spending') ...[
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: needOrWant,
-                    decoration: const InputDecoration(labelText: 'Classification'),
-                    items: const [
-                      DropdownMenuItem(value: 'need', child: Text('Need')),
-                      DropdownMenuItem(value: 'want', child: Text('Want')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => needOrWant = v);
-                    },
-                  ),
-                ],
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  value: needOrWant,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Classification'),
+                  items: const [
+                    DropdownMenuItem(value: 'need', child: Text('Need')),
+                    DropdownMenuItem(value: 'want', child: Text('Want')),
+                    DropdownMenuItem(value: null, child: Text('— None —')),
+                  ],
+                  onChanged: (v) {
+                    setState(() => needOrWant = v);
+                  },
+                ),
               ],
             ),
           ),
@@ -974,27 +988,32 @@ class _BudgetGroupCard extends ConsumerWidget {
             ),
             FilledButton(
               onPressed: () async {
-                final name = nameCtrl.text.trim();
-                final group = groupCtrl.text.trim();
-                if (name.isEmpty) {
+                final category = categoryCtrl.text.trim();
+                final subcat = subcatCtrl.text.trim();
+                if (category.isEmpty) {
                   AppFeedback.showWarning(context, 'Please enter a category name.');
                   return;
                 }
 
+                final finalGroup = category;
+                final finalName = subcat.isNotEmpty ? subcat : category;
+
                 final db = ref.read(appDatabaseProvider);
                 await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
                     .write(CategoriesTableCompanion(
-                  name: Value(name),
-                  groupCode: Value(group.isNotEmpty ? group : null),
+                  name: Value(finalName),
+                  groupCode: Value(finalGroup),
                   kind: Value(kind),
-                  needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                  needOrWant: (needOrWant != null && needOrWant!.isNotEmpty)
+                      ? Value(needOrWant!)
+                      : const Value.absent(),
                 ));
 
                 ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  AppFeedback.showSuccess(context, 'Category "$name" updated!');
+                  AppFeedback.showSuccess(context, 'Category "$finalName" updated!');
                 }
               },
               child: const Text('Save'),

@@ -491,15 +491,31 @@ class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (err, stack) => Center(child: Text('Error loading categories: $err')),
       data: (categories) {
-        final uniqueMap = <String, CategoriesTableData>{};
+        // Detect duplicates by groupCode+name for debug visibility.
+        // We do NOT silently drop them — instead we track which names collide
+        // and show a distinguishing detail (last 8 chars of ID) on duplicates.
+        final seenKeys = <String>{};
+        final duplicateKeys = <String>{};
         for (final c in categories) {
-           uniqueMap['${c.groupCode}_${c.name.toLowerCase()}'] = c;
+          final key = '${c.groupCode}_${c.name.toLowerCase()}';
+          if (!seenKeys.add(key)) {
+            duplicateKeys.add(key);
+            assert(() {
+              // ignore: avoid_print
+              debugPrint(
+                '[CategoryPicker] ⚠️ Duplicate detected: name="${c.name}" '
+                'groupCode="${c.groupCode}" ids overlap — '
+                'showing both with ID suffix to distinguish.',
+              );
+              return true;
+            }());
+          }
         }
-        final uniqueCategories = uniqueMap.values.toList();
 
-        final filtered = uniqueCategories.where((c) {
+        final filtered = categories.where((c) {
           if (_query.isEmpty) return true;
-          return c.name.toLowerCase().contains(_query.toLowerCase());
+          return c.name.toLowerCase().contains(_query.toLowerCase()) ||
+              (c.groupCode?.toLowerCase().contains(_query.toLowerCase()) ?? false);
         }).toList();
 
         return Column(
@@ -535,6 +551,12 @@ class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
                 itemCount: filtered.length,
                 itemBuilder: (_, i) {
                   final cat = filtered[i];
+                  final catKey = '${cat.groupCode}_${cat.name.toLowerCase()}';
+                  final isDuplicate = duplicateKeys.contains(catKey);
+                  // For duplicates: show last 6 chars of ID as a subtle disambiguator
+                  final idSuffix = isDuplicate
+                      ? ' · ${cat.id.length > 6 ? cat.id.substring(cat.id.length - 6) : cat.id}'
+                      : '';
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: PressableScale(
@@ -545,8 +567,16 @@ class _CategoryPickerSheetState extends ConsumerState<_CategoryPickerSheet> {
                           cat.name,
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
-                        subtitle: cat.groupCode != null
-                            ? Text(cat.groupCode!, style: TextStyle(color: cs.onSurfaceVariant))
+                        subtitle: cat.groupCode != null || isDuplicate
+                            ? Text(
+                                '${cat.groupCode ?? ''}$idSuffix',
+                                style: TextStyle(
+                                  color: isDuplicate
+                                      ? cs.error.withValues(alpha: 0.7)
+                                      : cs.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              )
                             : null,
                         leading: Container(
                           padding: const EdgeInsets.all(8),

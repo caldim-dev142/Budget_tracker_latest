@@ -41,6 +41,43 @@ class AppInitService {
           ..where((c) => c.name.equals('Lending/Return(-)') | c.name.equals('Others(Outflow)')))
         .write(const CategoriesTableCompanion(isDeduction: Value(true)));
 
+    // Fix inverted category/subcategory (e.g. groupCode: 'Pod', name: 'electronic')
+    await (db.update(db.categoriesTable)
+          ..where((c) =>
+              (c.groupCode.equals('Pod') | c.groupCode.equals('pod') | c.groupCode.equals('POD')) &
+              (c.name.equals('electronic') | c.name.equals('Electronic') | c.name.equals('ELECTRONIC'))))
+        .write(const CategoriesTableCompanion(
+          groupCode: Value('electronic'),
+          name: Value('Pod'),
+        ));
+
+    // Remap any entries incorrectly pointing to prepended custom category ids (e.g. {householdId}-cat-12345)
+    final mangledEntries = await (db.select(db.entriesTable)
+          ..where((e) => e.categoryId.like('%-cat-%') | e.categoryId.like('%-custom-%')))
+        .get();
+    for (final entry in mangledEntries) {
+      final catId = entry.categoryId;
+      final catIdx = catId.indexOf('-cat-');
+      final customIdx = catId.indexOf('-custom-');
+      String? cleanId;
+      if (catIdx != -1) {
+        cleanId = catId.substring(catIdx + 1);
+      } else if (customIdx != -1) {
+        cleanId = catId.substring(customIdx + 1);
+      }
+      if (cleanId != null) {
+        await (db.update(db.entriesTable)..where((e) => e.id.equals(entry.id)))
+            .write(EntriesTableCompanion(categoryId: Value(cleanId)));
+      }
+    }
+
+    // Clean up any dummy categories whose id was mangled and name is just the raw id
+    await (db.delete(db.categoriesTable)
+          ..where((c) =>
+              (c.id.like('%-cat-%') | c.id.like('%-custom-%')) &
+              (c.name.like('cat-%') | c.name.like('custom-%'))))
+        .go();
+
     // ── 3. System categories for 'local' offline household ─────────────────
     await db.ensureSystemCategoriesForHousehold(localHouseholdId);
   }
