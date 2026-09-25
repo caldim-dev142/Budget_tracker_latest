@@ -13,8 +13,11 @@ import '../../../core/services/app_init_service.dart';
 import '../../../core/services/sync_service.dart';
 
 /// Production backend URL supplied at compile-time via --dart-define=BACKEND_URL=https://...
-const String kBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
-const String kDefaultServerUrl = 'http://192.168.1.166:3001';
+const String kBackendUrl = String.fromEnvironment(
+  'BACKEND_URL',
+  defaultValue: 'https://caldimproducts.com/calbudget/api',
+);
+const String kDefaultServerUrl = 'https://caldimproducts.com/calbudget/api';
 
 /// Loopback / emulator hosts that may still be reached over plain HTTP.
 ///
