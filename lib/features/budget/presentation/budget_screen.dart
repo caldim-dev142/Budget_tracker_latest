@@ -286,11 +286,71 @@ class BudgetScreen extends ConsumerWidget {
 
 // ─── Budget Planner Tab ───────────────────────────────────────────────────────
 
-class _BudgetPlannerTab extends ConsumerWidget {
+/// Pure helper for filtering category groups by search query (category or subcategory name).
+/// Retains parent category structure when a subcategory matches.
+Map<String, List<CategoriesTableData>> filterBudgetCategoryGroups({
+  required Map<String, List<CategoriesTableData>> grouped,
+  required String query,
+}) {
+  final cleanQuery = query.trim().toLowerCase();
+  if (cleanQuery.isEmpty) return grouped;
+
+  final Map<String, List<CategoriesTableData>> result = {};
+  for (final entry in grouped.entries) {
+    final groupNameMatches = entry.key.toLowerCase().contains(cleanQuery);
+    if (groupNameMatches) {
+      // Parent category matches query: keep all its subcategories
+      result[entry.key] = entry.value;
+    } else {
+      // Check if any subcategory matches query
+      final matchingSubcats = entry.value
+          .where((c) => c.name.toLowerCase().contains(cleanQuery))
+          .toList();
+      if (matchingSubcats.isNotEmpty) {
+        // Keep parent category and show only matching subcategories
+        result[entry.key] = matchingSubcats;
+      }
+    }
+  }
+  return result;
+}
+
+String _kindLabel(String kind) {
+  switch (kind) {
+    case 'spending':
+      return 'Expense';
+    case 'income':
+      return 'Income';
+    case 'protection':
+      return 'Protection';
+    case 'saving':
+      return 'Saving';
+    case 'adjustment':
+      return 'Adjustment';
+    default:
+      return 'All';
+  }
+}
+
+class _BudgetPlannerTab extends ConsumerStatefulWidget {
   const _BudgetPlannerTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_BudgetPlannerTab> createState() => _BudgetPlannerTabState();
+}
+
+class _BudgetPlannerTabState extends ConsumerState<_BudgetPlannerTab> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final ym = ref.watch(selectedMonthProvider);
     final catsAsync = ref.watch(_allCategoriesProvider);
     final budgetsAsync = ref.watch(_budgetsProvider(ym));
@@ -335,6 +395,13 @@ class _BudgetPlannerTab extends ConsumerWidget {
           for (final key in grouped.keys) {
             grouped[key]!.sort((a, b) => b.sortOrder.compareTo(a.sortOrder));
           }
+
+          // Apply search query filter
+          final displayGrouped = filterBudgetCategoryGroups(
+            grouped: grouped,
+            query: _searchQuery,
+          );
+          final isSearching = _searchQuery.isNotEmpty;
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
@@ -385,41 +452,164 @@ class _BudgetPlannerTab extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
 
-              // Filter Chips
+              // Search Bar + Integrated Filter Button
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (val) {
+                        setState(() {
+                          _searchQuery = val.trim().toLowerCase();
+                        });
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Search categories or subcategories...',
+                        hintStyle: TextStyle(
+                          fontSize: 13,
+                          color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                        suffixIcon: _searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear_rounded, size: 18),
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  _searchCtrl.clear();
+                                  setState(() {
+                                    _searchQuery = '';
+                                  });
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        isDense: true,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.25)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: cs.primary, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  PopupMenuButton<String>(
+                    tooltip: 'Filter categories',
+                    initialValue: kindFilter,
+                    onSelected: (val) {
+                      ref.read(_selectedKindFilterProvider.notifier).state = val;
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'all', child: Text('All Types')),
+                      PopupMenuItem(value: 'spending', child: Text('Expense')),
+                      PopupMenuItem(value: 'income', child: Text('Income')),
+                      PopupMenuItem(value: 'protection', child: Text('Protection')),
+                      PopupMenuItem(value: 'saving', child: Text('Saving')),
+                      PopupMenuItem(value: 'adjustment', child: Text('Adjustment')),
+                    ],
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: kindFilter != 'all'
+                            ? cs.primary.withValues(alpha: 0.15)
+                            : cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: kindFilter != 'all'
+                              ? cs.primary.withValues(alpha: 0.5)
+                              : cs.outlineVariant.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.filter_list_rounded,
+                        size: 20,
+                        color: kindFilter != 'all' ? cs.primary : cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Filter Chips Carousel
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    _filterChip(ref, 'all', 'All'),
-                    _filterChip(ref, 'spending', 'Expense'),
-                    _filterChip(ref, 'income', 'Income'),
-                    _filterChip(ref, 'protection', 'Protection'),
-                    _filterChip(ref, 'saving', 'Saving'),
-                    _filterChip(ref, 'adjustment', 'Adjustment'),
+                    _filterChip('all', 'All'),
+                    _filterChip('spending', 'Expense'),
+                    _filterChip('income', 'Income'),
+                    _filterChip('protection', 'Protection'),
+                    _filterChip('saving', 'Saving'),
+                    _filterChip('adjustment', 'Adjustment'),
                   ],
                 ),
               ),
               const SizedBox(height: 14),
 
-              if (grouped.isEmpty)
+              if (displayGrouped.isEmpty)
                 Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      'No categories found for this filter.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: cs.onSurfaceVariant,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.search_off_rounded,
+                            size: 56,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No categories found',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: cs.onSurface,
+                              ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          isSearching
+                              ? 'No categories match "$_searchQuery" under ${_kindLabel(kindFilter)}.'
+                              : 'No categories available under ${_kindLabel(kindFilter)}.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                        ),
+                        if (isSearching || kindFilter != 'all') ...[
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.refresh_rounded, size: 16),
+                            label: const Text('Reset Search & Filter'),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                              ref.read(_selectedKindFilterProvider.notifier).state = 'all';
+                            },
                           ),
+                        ],
+                      ],
                     ),
                   ),
                 )
               else
-                ...grouped.entries.map((entry) {
+                ...displayGrouped.entries.map((entry) {
                   return _BudgetGroupCard(
                     groupName: entry.key,
                     categories: entry.value,
                     budgetMap: budgetMap,
                     ym: ym,
+                    isSearching: isSearching,
                   );
                 }),
             ],
@@ -429,7 +619,7 @@ class _BudgetPlannerTab extends ConsumerWidget {
     );
   }
 
-  Widget _filterChip(WidgetRef ref, String kind, String label) {
+  Widget _filterChip(String kind, String label) {
     final current = ref.watch(_selectedKindFilterProvider);
     final selected = current == kind;
     return Padding(
@@ -450,12 +640,14 @@ class _BudgetGroupCard extends ConsumerWidget {
   final List<CategoriesTableData> categories;
   final Map<String, int> budgetMap;
   final YearMonth ym;
+  final bool isSearching;
 
   const _BudgetGroupCard({
     required this.groupName,
     required this.categories,
     required this.budgetMap,
     required this.ym,
+    this.isSearching = false,
   });
 
   @override
@@ -467,8 +659,10 @@ class _BudgetGroupCard extends ConsumerWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ExpansionTile(
-        key: PageStorageKey('group_${ym}_$groupName'),
-        initiallyExpanded: false,
+        key: isSearching
+            ? ValueKey('group_${ym}_${groupName}_search')
+            : PageStorageKey('group_${ym}_$groupName'),
+        initiallyExpanded: isSearching,
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: Container(
           padding: const EdgeInsets.all(8),

@@ -31,6 +31,7 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
   String _amountStr = '';
   String? _selectedCategoryId;
   String? _selectedCategoryName;
+  // Default to current local date+time; time is preserved/editable
   DateTime _entryDate = DateTime.now();
   final _noteCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
@@ -87,7 +88,7 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
         _amountCtrl.text = amountStr;
         _selectedCategoryId = entry.categoryId;
         _selectedCategoryName = category?.name ?? entry.categoryId;
-        _entryDate = entry.entryDate;
+        _entryDate = entry.entryDate.toLocal();
         _noteCtrl.text = entry.note ?? '';
         _kind = _kindFromString(entry.kind);
       });
@@ -368,27 +369,69 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
             ),
             const SizedBox(height: 8),
 
-            // ─── Date picker ─────────────────────────────────────────────────
+            // ─── Date & Time picker ──────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+              child: Text(
+                widget.entryId != null ? 'Recorded Date & Time' : 'Transaction Date & Time',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.8),
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: PressableScale(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => _pickDate(context),
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickDate(context),
-                  icon: Icon(Icons.calendar_today_outlined, color: cs.primary),
-                  label: Text(
-                    _formatDate(_entryDate),
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    alignment: Alignment.centerLeft,
-                    shape: RoundedRectangleBorder(
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: PressableScale(
                       borderRadius: BorderRadius.circular(14),
+                      onTap: () => _pickDate(context),
+                      child: OutlinedButton.icon(
+                        onPressed: () => _pickDate(context),
+                        icon: Icon(Icons.calendar_today_outlined, size: 18, color: cs.primary),
+                        label: Text(
+                          _formatDateOnly(_entryDate),
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: PressableScale(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => _pickTime(context),
+                      child: OutlinedButton.icon(
+                        onPressed: () => _pickTime(context),
+                        icon: Icon(Icons.access_time_rounded, size: 18, color: cs.primary),
+                        label: Text(
+                          _formatTimeOnly(_entryDate),
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),
@@ -411,22 +454,72 @@ class _AddEntryScreenState extends ConsumerState<AddEntryScreen> {
     );
   }
 
-  String _formatDate(DateTime d) {
+  String _formatDateOnly(DateTime d) {
     final today = DateTime.now();
     if (d.year == today.year && d.month == today.month && d.day == today.day) {
       return 'Today';
     }
-    return '${d.day}/${d.month}/${d.year}';
+    final yesterday = today.subtract(const Duration(days: 1));
+    if (d.year == yesterday.year && d.month == yesterday.month && d.day == yesterday.day) {
+      return 'Yesterday';
+    }
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+
+  String _formatTimeOnly(DateTime d) {
+    final hour = d.hour;
+    final minute = d.minute;
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    final minuteStr = minute.toString().padLeft(2, '0');
+    return '$displayHour:$minuteStr $period';
   }
 
   Future<void> _pickDate(BuildContext context) async {
+    final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
-      initialDate: _entryDate,
+      initialDate: _entryDate.isAfter(DateTime(now.year + 5))
+          ? DateTime(now.year + 5)
+          : (_entryDate.isBefore(DateTime(2020)) ? DateTime(2020) : _entryDate),
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: DateTime(now.year + 5, 12, 31),
     );
-    if (picked != null) setState(() => _entryDate = picked);
+    if (picked != null) {
+      setState(() {
+        // Preserve the current time when only changing the date
+        _entryDate = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _entryDate.hour,
+          _entryDate.minute,
+          _entryDate.second,
+        );
+      });
+    }
+  }
+
+  Future<void> _pickTime(BuildContext context) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _entryDate.hour, minute: _entryDate.minute),
+    );
+    if (picked != null) {
+      setState(() {
+        _entryDate = DateTime(
+          _entryDate.year,
+          _entryDate.month,
+          _entryDate.day,
+          picked.hour,
+          picked.minute,
+        );
+      });
+    }
   }
 
   void _showCategoryPicker(BuildContext context) {

@@ -348,6 +348,7 @@ class _EntryTile extends ConsumerWidget {
     };
 
     final formattedDate = formatDateShort(entry.entryDate.toUtc(), tzOffset);
+    final formattedTime = formatTime(entry.entryDate.toUtc(), tzOffset);
 
     return Dismissible(
       key: Key(entry.id),
@@ -430,14 +431,28 @@ class _EntryTile extends ConsumerWidget {
                   ],
                 ),
               ),
-              MoneyText(
-                amount,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: amountColor,
-                      fontSize: 16,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  MoneyText(
+                    amount,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: amountColor,
+                          fontSize: 16,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    formattedTime,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: cs.onSurfaceVariant.withValues(alpha: 0.55),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                ],
               ),
             ],
           ),

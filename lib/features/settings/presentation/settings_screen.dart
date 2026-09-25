@@ -871,16 +871,33 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _exportToCsv(BuildContext context, WidgetRef ref) async {
     final db = ref.read(appDatabaseProvider);
-    // DEF-DATA-05: export only the active household's live (not soft-deleted) entries.
-    final householdId = ref.read(authStateProvider).valueOrNull?.householdId ?? 'local';
-    final entries = await (db.select(db.entriesTable)
-          ..where((e) => e.householdId.equals(householdId) & e.deletedAt.isNull())
-          ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
-        .get();
-    final categoryNames = {
-      for (final c in await (db.select(db.categoriesTable)..where((c) => c.householdId.equals(householdId))).get())
-        c.id: c.name,
-    };
+    final authHouseholdId = ref.read(authStateProvider).valueOrNull?.householdId;
+
+    // Load non-deleted entries. Match active household, and include 'local' entries if present.
+    List<EntriesTableData> entries;
+    if (authHouseholdId != null && authHouseholdId.isNotEmpty && authHouseholdId != 'local') {
+      entries = await (db.select(db.entriesTable)
+            ..where((e) =>
+                (e.householdId.equals(authHouseholdId) | e.householdId.equals('local')) &
+                e.deletedAt.isNull())
+            ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+          .get();
+      if (entries.isEmpty) {
+        // Fallback: any live entries in the database
+        entries = await (db.select(db.entriesTable)
+              ..where((e) => e.deletedAt.isNull())
+              ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+            .get();
+      }
+    } else {
+      entries = await (db.select(db.entriesTable)
+            ..where((e) => e.deletedAt.isNull())
+            ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+          .get();
+    }
+
+    final allCategories = await db.select(db.categoriesTable).get();
+    final categoryNames = {for (final c in allCategories) c.id: c.name};
 
     if (entries.isEmpty) {
       if (context.mounted) {
@@ -899,10 +916,12 @@ class SettingsScreen extends ConsumerWidget {
 
     csvBuffer.writeln('ID,Date,Category,Type,Amount (Paise),Note');
     for (final e in entries) {
+      final catName = categoryNames[e.categoryId] ??
+          (e.categoryId.isNotEmpty ? e.categoryId : 'Uncategorized');
       csvBuffer.writeln([
         csvField(e.id),
         e.entryDate.toIso8601String().split('T').first,
-        csvField(categoryNames[e.categoryId] ?? e.categoryId),
+        csvField(catName),
         csvField(e.kind),
         e.amountPaise.toString(),
         csvField(e.note),
@@ -910,10 +929,17 @@ class SettingsScreen extends ConsumerWidget {
     }
 
     try {
-      final resultPath = await exportCsv(csvBuffer.toString());
+      final now = DateTime.now();
+      final dateStr =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final fileName = 'budget_tracker_export_$dateStr.csv';
+      final resultPath = await exportCsv(csvBuffer.toString(), fileName: fileName);
 
       if (context.mounted) {
-        AppFeedback.showSuccess(context, 'Exported to CSV successfully: $resultPath');
+        AppFeedback.showSuccess(
+          context,
+          'Exported ${entries.length} entries to CSV!\n$resultPath',
+        );
       }
     } catch (e) {
       if (context.mounted) {
