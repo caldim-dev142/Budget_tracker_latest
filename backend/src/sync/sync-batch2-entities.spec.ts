@@ -246,10 +246,12 @@ describe('SyncService — Non-Entries Entity Sync Paths (Categories, Cards, Bill
     });
 
     it('rejects batch with ForbiddenException if category belongs to a different household', async () => {
-      prismaMock.category.findUnique.mockResolvedValue({
-        id: 'cat-other-1',
-        householdId: otherHouseholdId,
-      });
+      prismaMock.category.findMany.mockResolvedValue([
+        {
+          id: 'cat-other-1',
+          householdId: otherHouseholdId,
+        },
+      ]);
 
       const dto = {
         categories: [{ id: 'cat-other-1', name: 'Other Cat', kind: 'spending' }],
