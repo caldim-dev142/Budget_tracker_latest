@@ -48,7 +48,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final authState = ref.read(authStateProvider);
       final isAuthenticated = authState.valueOrNull?.isAuthenticated ?? false;
-      final hasCompletedOnboarding = authState.valueOrNull?.hasCompletedOnboarding ?? false;
       final onAuthPage = state.fullPath?.startsWith('/auth') ?? false;
       final onSplash = state.fullPath == '/splash';
       final onOnboarding = state.fullPath == '/onboarding';

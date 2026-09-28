@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
-import 'package:drift/drift.dart' as drift;
 
 import 'package:budget_tracker/data/local/database.dart';
 import 'package:budget_tracker/core/services/sync_service.dart';
