@@ -8,28 +8,28 @@ class LegalConstants {
   LegalConstants._();
 
   /// URL to the publicly hosted Privacy Policy.
-  /// Example: https://yourdomain.com/privacy-policy
+  /// Example: https://www.caldimproducts.com/calbudget/privacy
   static const String privacyPolicyUrl = String.fromEnvironment(
     'PRIVACY_POLICY_URL',
-    defaultValue: 'https://calbudget.app/privacy-policy',
+    defaultValue: 'https://www.caldimproducts.com/calbudget/privacy',
   );
 
   /// URL to the publicly hosted Terms of Service.
-  /// Example: https://yourdomain.com/terms-of-service
+  /// Example: https://www.caldimproducts.com/calbudget/terms
   static const String termsOfServiceUrl = String.fromEnvironment(
     'TERMS_OF_SERVICE_URL',
-    defaultValue: 'https://calbudget.app/terms-of-service',
+    defaultValue: 'https://www.caldimproducts.com/calbudget/terms',
   );
 
   /// URL for external web-based account deletion request (Google Play requirement).
-  /// Example: https://yourdomain.com/delete-account
+  /// Example: https://www.caldimproducts.com/calbudget/account-deletion
   static const String accountDeletionUrl = String.fromEnvironment(
     'ACCOUNT_DELETION_URL',
-    defaultValue: 'https://calbudget.app/delete-account',
+    defaultValue: 'https://www.caldimproducts.com/calbudget/account-deletion',
   );
 
   /// Support email for user contact & compliance inquiries.
-  static const String supportEmail = 'support@calbudget.app';
+  static const String supportEmail = 'support@caldimproducts.com';
 
   /// Shows the Privacy Policy summary dialog in-app.
   static void showPrivacyPolicyDialog(BuildContext context) {
