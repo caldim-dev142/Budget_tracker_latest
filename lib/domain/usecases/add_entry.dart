@@ -2,7 +2,6 @@ import 'package:uuid/uuid.dart';
 import '../../core/utils/money.dart';
 import '../../core/utils/result.dart';
 import '../entities/entry.dart';
-import '../entities/category.dart';
 
 const _uuid = Uuid();
 

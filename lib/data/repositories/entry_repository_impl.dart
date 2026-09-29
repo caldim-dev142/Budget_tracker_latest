@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
-import '../../core/utils/money.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/usecases/add_entry.dart';
 import '../local/database.dart';

@@ -1,7 +1,6 @@
 import 'package:equatable/equatable.dart';
 import '../../core/utils/money.dart';
 import '../../core/utils/month.dart';
-import 'category.dart';
 
 /// The fundamental transaction record.
 /// Maps to one cell value in the Excel matrix (doc 01 §1 "store entries, not cells").

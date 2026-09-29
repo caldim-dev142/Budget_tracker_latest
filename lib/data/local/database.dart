@@ -12,7 +12,6 @@ import 'daos/card_dao.dart';
 import 'daos/account_dao.dart';
 import 'daos/borrow_lend_dao.dart';
 import 'connection/connection.dart';
-import '../../core/security/password_hasher.dart';
 
 part 'database.g.dart';
 
