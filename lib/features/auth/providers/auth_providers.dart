@@ -23,14 +23,20 @@ const String kDefaultServerUrl = 'https://caldimproducts.com/budgettracker';
 ///
 /// These are unreachable from a real user's device, so permitting cleartext to
 /// them keeps local development working without weakening release builds.
-bool isLoopbackHost(String host) =>
-    host == 'localhost' ||
-    host == '127.0.0.1' ||
-    host == '::1' ||
-    host == '10.0.2.2' ||
-    host.startsWith('192.168.') ||
-    host.startsWith('10.') ||
-    RegExp(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.').hasMatch(host);
+bool isLoopbackHost(String host) {
+  if (host == 'localhost' ||
+      host == '127.0.0.1' ||
+      host == '::1' ||
+      host == '10.0.2.2') {
+    return true;
+  }
+  if (!kReleaseMode) {
+    return host.startsWith('192.168.') ||
+        host.startsWith('10.') ||
+        RegExp(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.').hasMatch(host);
+  }
+  return false;
+}
 
 /// Blocks plaintext HTTP requests in release builds.
 ///
@@ -256,9 +262,13 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
 
   Future<void> _restoreSavedSession() async {
     try {
-      final savedUrl = await SecureStore.read('server_backend_url');
-      if (savedUrl != null && savedUrl.trim().isNotEmpty) {
-        _ref.read(serverUrlProvider.notifier).state = savedUrl.trim();
+      if (!kReleaseMode) {
+        final savedUrl = await SecureStore.read('server_backend_url');
+        if (savedUrl != null && savedUrl.trim().isNotEmpty) {
+          _ref.read(serverUrlProvider.notifier).state = savedUrl.trim();
+        }
+      } else {
+        await SecureStore.delete('server_backend_url');
       }
     } catch (_) {}
 
