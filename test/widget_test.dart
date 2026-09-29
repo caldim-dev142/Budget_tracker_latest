@@ -24,9 +24,9 @@ void main() {
 
     // Let the initial frame render and trigger loaders
     await tester.pump();
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle(const Duration(seconds: 1));
 
-    // Verify app router loads the main screen (which could be the loading or onboarding/dashboard)
+    // Verify app router loads the main screen
     expect(find.byType(MaterialApp), findsOneWidget);
 
     await db.close();
