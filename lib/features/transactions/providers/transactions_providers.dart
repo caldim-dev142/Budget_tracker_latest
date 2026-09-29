@@ -113,7 +113,9 @@ final activeCategoriesProvider = StreamProvider.family<List<CategoriesTableData>
       final dbKind = c.kind.toLowerCase();
       if (kind == EntryKind.spending && dbKind == 'spending') return true;
       if ((kind == EntryKind.income || kind == EntryKind.incomeDeduction) &&
-          (dbKind == 'income' || dbKind == 'incomededuction')) return true;
+          (dbKind == 'income' || dbKind == 'incomededuction')) {
+        return true;
+      }
       if (kind == EntryKind.adjustment && dbKind == 'adjustment') return true;
       if (kind == EntryKind.protection && dbKind == 'protection') return true;
       if (kind == EntryKind.saving && dbKind == 'saving') return true;

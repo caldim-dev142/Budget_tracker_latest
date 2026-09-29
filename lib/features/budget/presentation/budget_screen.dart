@@ -102,18 +102,21 @@ class BudgetScreen extends ConsumerWidget {
   }
 
   void _showAddCategoryDialog(BuildContext context, WidgetRef ref, {String? defaultGroup}) {
-    final nameCtrl = TextEditingController();
-    final groupCtrl = TextEditingController(text: defaultGroup ?? '');
+    final categoryCtrl = TextEditingController(text: defaultGroup ?? '');
+    final subcatCtrl = TextEditingController();
     String kind = ref.read(_selectedKindFilterProvider);
     if (kind == 'all') kind = 'spending';
-    String needOrWant = 'need';
+    String? needOrWant = 'need';
 
     showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+            final currentCategoryText = categoryCtrl.text.trim();
+            final currentSubcategory = subcatCtrl.text.trim();
+
+            final liveIcon = categoryIcon(currentSubcategory.isNotEmpty ? currentSubcategory : currentCategoryText, kind, currentCategoryText);
             final liveColor = categoryIconColor(kind);
 
             return AlertDialog(
@@ -158,7 +161,7 @@ class BudgetScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 Text(
-                                  nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                  categoryCtrl.text.trim().isEmpty ? 'Type name to generate' : categoryCtrl.text.trim(),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -171,7 +174,7 @@ class BudgetScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
-                      initialValue: kind,
+                      value: kind,
                       isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Category Type'),
                       items: const [
@@ -182,43 +185,47 @@ class BudgetScreen extends ConsumerWidget {
                         DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
                       ],
                       onChanged: (v) {
-                        if (v != null) setState(() => kind = v);
+                        if (v != null) {
+                          setState(() {
+                            kind = v;
+                            subcatCtrl.clear();
+                          });
+                        }
                       },
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: nameCtrl,
+                      controller: categoryCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Category Name *',
+                        labelText: 'Category',
                         hintText: 'e.g. Groceries',
                       ),
-                      autofocus: true,
+                      autofocus: defaultGroup == null,
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: groupCtrl,
+                      controller: subcatCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Group / Subcategory *',
+                        labelText: 'Subcategory',
                         hintText: 'e.g. Food & Dining',
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
-                    if (kind == 'spending') ...[
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: needOrWant,
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Classification'),
-                        items: const [
-                          DropdownMenuItem(value: 'need', child: Text('Need')),
-                          DropdownMenuItem(value: 'want', child: Text('Want')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) setState(() => needOrWant = v);
-                        },
-                      ),
-                    ],
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      value: needOrWant,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Classification'),
+                      items: const [
+                        DropdownMenuItem(value: 'need', child: Text('Need')),
+                        DropdownMenuItem(value: 'want', child: Text('Want')),
+                        DropdownMenuItem(value: null, child: Text('— None —')),
+                      ],
+                      onChanged: (v) {
+                        setState(() => needOrWant = v);
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -229,12 +236,15 @@ class BudgetScreen extends ConsumerWidget {
                 ),
                 FilledButton(
                   onPressed: () async {
-                    final name = nameCtrl.text.trim();
-                    final group = groupCtrl.text.trim();
-                    if (name.isEmpty) {
+                    final category = categoryCtrl.text.trim();
+                    final subcat = subcatCtrl.text.trim();
+                    if (category.isEmpty) {
                       AppFeedback.showWarning(context, 'Please enter a category name.');
                       return;
                     }
+
+                    final finalGroup = category;
+                    final finalName = subcat.isNotEmpty ? subcat : category;
 
                     final db = ref.read(appDatabaseProvider);
                     final auth = ref.read(authStateProvider).valueOrNull;
@@ -242,12 +252,14 @@ class BudgetScreen extends ConsumerWidget {
 
                     await db.categoryDao.upsertAll([
                       CategoriesTableCompanion.insert(
-                        id: 'cat-${DateTime.now().millisecondsSinceEpoch}',
+                        id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
                         householdId: householdId,
                         kind: kind,
-                        groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
-                        name: name,
-                        needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                        groupCode: Value(finalGroup),
+                        name: finalName,
+                        needOrWant: (needOrWant != null && needOrWant!.isNotEmpty)
+                            ? Value(needOrWant!)
+                            : const Value.absent(),
                         isDeduction: const Value(false),
                         isSystem: const Value(false),
                         sortOrder: const Value(100),
@@ -258,7 +270,7 @@ class BudgetScreen extends ConsumerWidget {
 
                     if (context.mounted) {
                       Navigator.pop(context);
-                      AppFeedback.showSuccess(context, 'Category "$name" added successfully!');
+                      AppFeedback.showSuccess(context, 'Added "$finalName" under "$finalGroup"!');
                     }
                   },
                   child: const Text('Save'),
@@ -274,11 +286,71 @@ class BudgetScreen extends ConsumerWidget {
 
 // ─── Budget Planner Tab ───────────────────────────────────────────────────────
 
-class _BudgetPlannerTab extends ConsumerWidget {
+/// Pure helper for filtering category groups by search query (category or subcategory name).
+/// Retains parent category structure when a subcategory matches.
+Map<String, List<CategoriesTableData>> filterBudgetCategoryGroups({
+  required Map<String, List<CategoriesTableData>> grouped,
+  required String query,
+}) {
+  final cleanQuery = query.trim().toLowerCase();
+  if (cleanQuery.isEmpty) return grouped;
+
+  final Map<String, List<CategoriesTableData>> result = {};
+  for (final entry in grouped.entries) {
+    final groupNameMatches = entry.key.toLowerCase().contains(cleanQuery);
+    if (groupNameMatches) {
+      // Parent category matches query: keep all its subcategories
+      result[entry.key] = entry.value;
+    } else {
+      // Check if any subcategory matches query
+      final matchingSubcats = entry.value
+          .where((c) => c.name.toLowerCase().contains(cleanQuery))
+          .toList();
+      if (matchingSubcats.isNotEmpty) {
+        // Keep parent category and show only matching subcategories
+        result[entry.key] = matchingSubcats;
+      }
+    }
+  }
+  return result;
+}
+
+String _kindLabel(String kind) {
+  switch (kind) {
+    case 'spending':
+      return 'Expense';
+    case 'income':
+      return 'Income';
+    case 'protection':
+      return 'Protection';
+    case 'saving':
+      return 'Saving';
+    case 'adjustment':
+      return 'Adjustment';
+    default:
+      return 'All';
+  }
+}
+
+class _BudgetPlannerTab extends ConsumerStatefulWidget {
   const _BudgetPlannerTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_BudgetPlannerTab> createState() => _BudgetPlannerTabState();
+}
+
+class _BudgetPlannerTabState extends ConsumerState<_BudgetPlannerTab> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final ym = ref.watch(selectedMonthProvider);
     final catsAsync = ref.watch(_allCategoriesProvider);
     final budgetsAsync = ref.watch(_budgetsProvider(ym));
@@ -323,6 +395,13 @@ class _BudgetPlannerTab extends ConsumerWidget {
           for (final key in grouped.keys) {
             grouped[key]!.sort((a, b) => b.sortOrder.compareTo(a.sortOrder));
           }
+
+          // Apply search query filter
+          final displayGrouped = filterBudgetCategoryGroups(
+            grouped: grouped,
+            query: _searchQuery,
+          );
+          final isSearching = _searchQuery.isNotEmpty;
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
@@ -373,41 +452,164 @@ class _BudgetPlannerTab extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
 
-              // Filter Chips
+              // Search Bar + Integrated Filter Button
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (val) {
+                        setState(() {
+                          _searchQuery = val.trim().toLowerCase();
+                        });
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Search categories or subcategories...',
+                        hintStyle: TextStyle(
+                          fontSize: 13,
+                          color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                        ),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                        suffixIcon: _searchCtrl.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear_rounded, size: 18),
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  _searchCtrl.clear();
+                                  setState(() {
+                                    _searchQuery = '';
+                                  });
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        isDense: true,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.25)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: cs.primary, width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  PopupMenuButton<String>(
+                    tooltip: 'Filter categories',
+                    initialValue: kindFilter,
+                    onSelected: (val) {
+                      ref.read(_selectedKindFilterProvider.notifier).state = val;
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'all', child: Text('All Types')),
+                      PopupMenuItem(value: 'spending', child: Text('Expense')),
+                      PopupMenuItem(value: 'income', child: Text('Income')),
+                      PopupMenuItem(value: 'protection', child: Text('Protection')),
+                      PopupMenuItem(value: 'saving', child: Text('Saving')),
+                      PopupMenuItem(value: 'adjustment', child: Text('Adjustment')),
+                    ],
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: kindFilter != 'all'
+                            ? cs.primary.withValues(alpha: 0.15)
+                            : cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: kindFilter != 'all'
+                              ? cs.primary.withValues(alpha: 0.5)
+                              : cs.outlineVariant.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.filter_list_rounded,
+                        size: 20,
+                        color: kindFilter != 'all' ? cs.primary : cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Filter Chips Carousel
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    _filterChip(ref, 'all', 'All'),
-                    _filterChip(ref, 'spending', 'Expense'),
-                    _filterChip(ref, 'income', 'Income'),
-                    _filterChip(ref, 'protection', 'Protection'),
-                    _filterChip(ref, 'saving', 'Saving'),
-                    _filterChip(ref, 'adjustment', 'Adjustment'),
+                    _filterChip('all', 'All'),
+                    _filterChip('spending', 'Expense'),
+                    _filterChip('income', 'Income'),
+                    _filterChip('protection', 'Protection'),
+                    _filterChip('saving', 'Saving'),
+                    _filterChip('adjustment', 'Adjustment'),
                   ],
                 ),
               ),
               const SizedBox(height: 14),
 
-              if (grouped.isEmpty)
+              if (displayGrouped.isEmpty)
                 Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      'No categories found for this filter.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: cs.onSurfaceVariant,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.search_off_rounded,
+                            size: 56,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No categories found',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: cs.onSurface,
+                              ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          isSearching
+                              ? 'No categories match "$_searchQuery" under ${_kindLabel(kindFilter)}.'
+                              : 'No categories available under ${_kindLabel(kindFilter)}.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                        ),
+                        if (isSearching || kindFilter != 'all') ...[
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.refresh_rounded, size: 16),
+                            label: const Text('Reset Search & Filter'),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                              ref.read(_selectedKindFilterProvider.notifier).state = 'all';
+                            },
                           ),
+                        ],
+                      ],
                     ),
                   ),
                 )
               else
-                ...grouped.entries.map((entry) {
+                ...displayGrouped.entries.map((entry) {
                   return _BudgetGroupCard(
                     groupName: entry.key,
                     categories: entry.value,
                     budgetMap: budgetMap,
                     ym: ym,
+                    isSearching: isSearching,
                   );
                 }),
             ],
@@ -417,7 +619,7 @@ class _BudgetPlannerTab extends ConsumerWidget {
     );
   }
 
-  Widget _filterChip(WidgetRef ref, String kind, String label) {
+  Widget _filterChip(String kind, String label) {
     final current = ref.watch(_selectedKindFilterProvider);
     final selected = current == kind;
     return Padding(
@@ -438,12 +640,14 @@ class _BudgetGroupCard extends ConsumerWidget {
   final List<CategoriesTableData> categories;
   final Map<String, int> budgetMap;
   final YearMonth ym;
+  final bool isSearching;
 
   const _BudgetGroupCard({
     required this.groupName,
     required this.categories,
     required this.budgetMap,
     required this.ym,
+    this.isSearching = false,
   });
 
   @override
@@ -455,8 +659,10 @@ class _BudgetGroupCard extends ConsumerWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ExpansionTile(
-        key: PageStorageKey('group_${ym}_$groupName'),
-        initiallyExpanded: false,
+        key: isSearching
+            ? ValueKey('group_${ym}_${groupName}_search')
+            : PageStorageKey('group_${ym}_$groupName'),
+        initiallyExpanded: isSearching,
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: Container(
           padding: const EdgeInsets.all(8),
@@ -905,17 +1111,19 @@ class _BudgetGroupCard extends ConsumerWidget {
   }
 
   void _showEditCategoryDialog(BuildContext context, WidgetRef ref, CategoriesTableData cat) {
-    final nameCtrl = TextEditingController(text: cat.name);
-    final groupCtrl = TextEditingController(text: cat.groupCode ?? '');
+    final categoryCtrl = TextEditingController(
+      text: (cat.groupCode != null && cat.groupCode!.isNotEmpty) ? cat.groupCode : cat.name,
+    );
+    final subcatCtrl = TextEditingController(text: cat.name);
     String kind = cat.kind;
-    String needOrWant = cat.needOrWant ?? 'need';
+    String? needOrWant = cat.needOrWant;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Edit Category'),
+          title: const Text('Edit Category / Subcategory'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -926,8 +1134,8 @@ class _BudgetGroupCard extends ConsumerWidget {
                   items: const [
                     DropdownMenuItem(value: 'spending', child: Text('Expense (Spending)')),
                     DropdownMenuItem(value: 'income', child: Text('Income')),
-                    DropdownMenuItem(value: 'protection', child: Text('Protection')),
-                    DropdownMenuItem(value: 'saving', child: Text('Saving')),
+                    DropdownMenuItem(value: 'protection', child: Text('Protection (Insurance/EMI)')),
+                    DropdownMenuItem(value: 'saving', child: Text('Saving & Investment')),
                     DropdownMenuItem(value: 'adjustment', child: Text('Adjustment')),
                   ],
                   onChanged: (v) {
@@ -936,34 +1144,34 @@ class _BudgetGroupCard extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: nameCtrl,
+                  controller: categoryCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Category Name *',
+                    labelText: 'Category *',
                     hintText: 'e.g. Groceries',
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: groupCtrl,
+                  controller: subcatCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Sub Category',
+                    labelText: 'Subcategory',
                     hintText: 'e.g. Food & Dining',
                   ),
                 ),
-                if (kind == 'spending') ...[
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: needOrWant,
-                    decoration: const InputDecoration(labelText: 'Classification'),
-                    items: const [
-                      DropdownMenuItem(value: 'need', child: Text('Need')),
-                      DropdownMenuItem(value: 'want', child: Text('Want')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => needOrWant = v);
-                    },
-                  ),
-                ],
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  value: needOrWant,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Classification'),
+                  items: const [
+                    DropdownMenuItem(value: 'need', child: Text('Need')),
+                    DropdownMenuItem(value: 'want', child: Text('Want')),
+                    DropdownMenuItem(value: null, child: Text('— None —')),
+                  ],
+                  onChanged: (v) {
+                    setState(() => needOrWant = v);
+                  },
+                ),
               ],
             ),
           ),
@@ -974,27 +1182,32 @@ class _BudgetGroupCard extends ConsumerWidget {
             ),
             FilledButton(
               onPressed: () async {
-                final name = nameCtrl.text.trim();
-                final group = groupCtrl.text.trim();
-                if (name.isEmpty) {
+                final category = categoryCtrl.text.trim();
+                final subcat = subcatCtrl.text.trim();
+                if (category.isEmpty) {
                   AppFeedback.showWarning(context, 'Please enter a category name.');
                   return;
                 }
 
+                final finalGroup = category;
+                final finalName = subcat.isNotEmpty ? subcat : category;
+
                 final db = ref.read(appDatabaseProvider);
                 await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
                     .write(CategoriesTableCompanion(
-                  name: Value(name),
-                  groupCode: Value(group.isNotEmpty ? group : null),
+                  name: Value(finalName),
+                  groupCode: Value(finalGroup),
                   kind: Value(kind),
-                  needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
+                  needOrWant: (needOrWant != null && needOrWant!.isNotEmpty)
+                      ? Value(needOrWant!)
+                      : const Value.absent(),
                 ));
 
                 ref.read(syncServiceProvider).triggerSync();
 
                 if (context.mounted) {
                   Navigator.pop(context);
-                  AppFeedback.showSuccess(context, 'Category "$name" updated!');
+                  AppFeedback.showSuccess(context, 'Category "$finalName" updated!');
                 }
               },
               child: const Text('Save'),

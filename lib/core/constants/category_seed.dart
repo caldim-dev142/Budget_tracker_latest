@@ -5,6 +5,7 @@ import '../../domain/entities/entry.dart';
 /// A new household starts with this full structure.
 ///
 /// Total: 14 income + 6 adjustment + ~80 spending + ~24 protection + ~17 saving = ~141 categories.
+
 List<Category> buildSeedCategories(String householdId) {
   return [
     // ─── INCOME (doc 01 §2.1) ───────────────────────────────────────────────

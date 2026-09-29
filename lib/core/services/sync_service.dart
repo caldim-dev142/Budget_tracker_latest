@@ -668,8 +668,20 @@ class SyncService {
           );
         }
 
-        // 5. AFTER pushing local data, pull any latest server-side changes to merge
-        await pullFromServer(cancelToken: effectiveCancelToken);
+        // 5. AFTER pushing local data, pull any latest server-side changes to merge.
+        // pullFromServer throws on any failure — do NOT swallow the error here;
+        // a failed pull must NOT be reported as a success to the user.
+        try {
+          await pullFromServer(cancelToken: effectiveCancelToken);
+        } catch (pullErr) {
+          debugPrint('[SyncService] Pull failed after successful push: $pullErr');
+          return SyncOutcome(
+            status: SyncStatus.failed,
+            pushedCount: successCount + allEntries.length,
+            pendingAfter: await _safePendingCount(),
+            error: pullErr,
+          );
+        }
 
         // Only now may this be called a success — and verify generation counter hasn't been superseded
         if (opId != _activeOperationId || effectiveCancelToken.isCancelled || isTimedOut) {
@@ -700,11 +712,14 @@ class SyncService {
           );
         }
 
-        // Even if batch push encounters an issue, attempt to pull latest server data
+        // Even if the batch push failed, attempt a best-effort pull so the
+        // device at least has the latest server state (push failure ≠ data loss).
+        // pullFromServer throws on failure; swallow it here because the primary
+        // error (push failure) is what we report — the pull is best-effort only.
         try {
           await pullFromServer(cancelToken: effectiveCancelToken);
         } catch (pullErr) {
-          debugPrint('Fallback pull error: $pullErr');
+          debugPrint('[SyncService] Fallback pull also failed: $pullErr');
         }
         // The failure is REPORTED, not swallowed. Returning successCount here is
         // what let a failed push masquerade as "0 changes needed syncing".
@@ -758,18 +773,23 @@ class SyncService {
   }
 
   /// Pulls all household data from backend PostgreSQL into local SQLite (GET /sync/pull).
-  Future<bool> pullFromServer({CancelToken? cancelToken}) async {
+  ///
+  /// **Throws** on any network, auth, or data-parsing failure so callers cannot
+  /// silently ignore a broken pull and falsely report success to the user.
+  /// Returns normally (void) only when the pull fully succeeded.
+  Future<void> pullFromServer({CancelToken? cancelToken}) async {
     final serverUrl = _ref.read(serverUrlProvider);
     final authState = _ref.read(authStateProvider).valueOrNull;
 
     if (serverUrl.isEmpty || authState == null || authState.authMode != AuthMode.authenticated) {
-      return false;
+      // Not authenticated — not an error, just a no-op.
+      return;
     }
 
     final token = authState.token;
-    if (token == null) return false;
+    if (token == null) return;
 
-    if (cancelToken?.isCancelled ?? false) return false;
+    if (cancelToken?.isCancelled ?? false) return;
 
     final db = _ref.read(appDatabaseProvider);
     final householdId = authState.householdId ?? 'default';
@@ -788,8 +808,13 @@ class SyncService {
       );
 
       final data = res.data;
-      if (data == null || data is! Map) return false;
-      if (cancelToken?.isCancelled ?? false) return false;
+      if (data == null || data is! Map) {
+        throw Exception(
+          'Server returned an unexpected response for /sync/pull '
+          '(type: ${data?.runtimeType}, status: ${res.statusCode}).',
+        );
+      }
+      if (cancelToken?.isCancelled ?? false) return;
       final unsentCloses = <String>[];
 
       await db.transaction(() async {
@@ -1111,8 +1136,12 @@ class SyncService {
           }
         }
 
-        // Recalculate account balances after all entries are restored
-        await db.accountDao.recalculateAllAccountBalances(householdId: householdId);
+        // NOTE: We intentionally do NOT recalculate account balances here.
+        // The server's /sync/pull response already provides the authoritative
+        // currentBalancePaise for each account (computed server-side from all
+        // entries). Recalculating locally risks overwriting the correct server
+        // balance with a wrong value when local category IDs differ from server
+        // IDs (e.g. after a fresh install where seed IDs use different prefixes).
       });
 
       for (final ym in unsentCloses) {
@@ -1123,10 +1152,12 @@ class SyncService {
       }
 
       debugPrint('Successfully pulled and synchronized all household data from server.');
-      return true;
     } catch (e) {
-      debugPrint('Failed to pull data from server: $e');
-      return false;
+      // Log with the full error so it shows up in flutter run output and
+      // logcat, then rethrow so callers can return SyncStatus.failed instead
+      // of falsely reporting success.
+      debugPrint('[SyncService] pullFromServer FAILED: $e');
+      rethrow;
     }
   }
 

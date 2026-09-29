@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY network security policy. Applies only to debug builds via
+  Android's src/debug source-set override — never bundled into a release/
+  Play Store build, which continues to use src/main's strict policy.
+  Allows cleartext HTTP to any address so real-device testing against a LAN
+  dev server works, since debug builds are never distributed to users.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

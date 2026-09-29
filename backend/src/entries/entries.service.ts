@@ -16,11 +16,25 @@ const NEGATIVE_ALLOWED_KINDS = ['adjustment', 'incomeDeduction'];
 const SYSTEM_CATEGORY_SUFFIXES = ['lend', 'borrow', 'bill-pay', 'return-received'];
 
 /**
- * Maps a client category id to the server id for this household.
- *  - Regular seeded ids ('spd-n05') are prefixed: '{householdId}-spd-n05'.
+ * Authoritative set of seed category ID prefixes from category_seed.dart / categories-seed.data.ts:
+ *  - inc- (Income)
+ *  - ded- (Income Deductions)
+ *  - adj- (Adjustments)
+ *  - spd- (Spending: fees, needs, wants, travel, honorarium, unplanned, purchase_misc)
+ *  - pro- (Protection: insurance, assets, events, vacation, medical, property, others, buffer)
+ *  - sav- (Saving: retirement, children, other_goals)
+ */
+export const SEED_CATEGORY_PREFIXES = ['inc-', 'ded-', 'adj-', 'spd-', 'pro-', 'sav-'] as const;
+
+/**
+ * Maps a client category id to the server id for this household:
  *  - Flutter system category ids ('lend-system-cat-{householdId}') and ids that were previously
  *    mis-prefixed ('{householdId}-lend-system-cat-{householdId}') map to the canonical backend
  *    system category '{householdId}-lend-system-cat' (categories-system.data.ts).
+ *  - If already prefixed with '{householdId}-', passes through unchanged.
+ *  - Known seed categories matching SEED_CATEGORY_PREFIXES (e.g. 'spd-n05') are prefixed: '{householdId}-spd-n05'.
+ *  - All other category IDs pass through unchanged (bare UUIDs from saving/protection, 'custom-*',
+ *    'cat-*', or any custom/future category formats).
  */
 export function normalizeCategoryId(categoryId: string | undefined, householdId: string): string | undefined {
   if (!categoryId) return categoryId;
@@ -30,7 +44,10 @@ export function normalizeCategoryId(categoryId: string | undefined, householdId:
       return `${householdId}-${suffix}-system-cat`;
     }
   }
-  if (!categoryId.startsWith(householdId) && !categoryId.startsWith('custom-')) {
+  if (categoryId.startsWith(`${householdId}-`)) {
+    return categoryId;
+  }
+  if (SEED_CATEGORY_PREFIXES.some((prefix) => categoryId.startsWith(prefix))) {
     return `${householdId}-${categoryId}`;
   }
   return categoryId;

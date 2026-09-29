@@ -67,6 +67,17 @@ String formatDateShort(DateTime dt, int offsetMinutes) {
   return '${local.day}/${local.month}/${local.year}';
 }
 
+/// Formats only the time portion of a [DateTime] as 'hh:mm AM/PM' in the given timezone offset.
+String formatTime(DateTime dt, int offsetMinutes) {
+  final local = toTimezone(dt, offsetMinutes);
+  final hour = local.hour;
+  final minute = local.minute;
+  final period = hour >= 12 ? 'PM' : 'AM';
+  final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+  final minuteStr = minute.toString().padLeft(2, '0');
+  return '$displayHour:$minuteStr $period';
+}
+
 /// Returns 'Today', 'Yesterday', or 'dd MMM yyyy' relative to now in timezone.
 String formatDateRelative(DateTime dt, int offsetMinutes) {
   final local = toTimezone(dt, offsetMinutes);

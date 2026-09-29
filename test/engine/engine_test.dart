@@ -2,16 +2,16 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/core/utils/money.dart';
-import '../../lib/core/utils/month.dart';
-import '../../lib/domain/engine/waterfall.dart';
-import '../../lib/domain/engine/budget.dart';
-import '../../lib/domain/engine/rollups.dart';
-import '../../lib/domain/engine/rollover.dart';
-import '../../lib/domain/engine/reserves.dart';
-import '../../lib/domain/entities/month_snapshot.dart';
-import '../../lib/domain/entities/entry.dart';
-import '../../lib/domain/entities/category.dart';
+import 'package:budget_tracker/core/utils/money.dart';
+import 'package:budget_tracker/core/utils/month.dart';
+import 'package:budget_tracker/domain/engine/waterfall.dart';
+import 'package:budget_tracker/domain/engine/budget.dart';
+import 'package:budget_tracker/domain/engine/rollups.dart';
+import 'package:budget_tracker/domain/engine/rollover.dart';
+import 'package:budget_tracker/domain/engine/reserves.dart';
+import 'package:budget_tracker/domain/entities/month_snapshot.dart';
+import 'package:budget_tracker/domain/entities/entry.dart';
+import 'package:budget_tracker/domain/entities/category.dart';
 
 void main() {
   // Load golden fixtures

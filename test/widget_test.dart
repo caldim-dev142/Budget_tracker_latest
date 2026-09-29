@@ -30,5 +30,6 @@ void main() {
     expect(find.byType(MaterialApp), findsOneWidget);
 
     await db.close();
+    await tester.pump(const Duration(milliseconds: 100));
   });
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -266,11 +267,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: Icon(Icons.dns_rounded, color: cs.primary),
-            tooltip: 'Backend Server Connection',
-            onPressed: () => _showServerSettingsDialog(context),
-          ),
+          if (kDebugMode)
+            IconButton(
+              icon: Icon(Icons.dns_rounded, color: cs.primary),
+              tooltip: 'Backend Server Connection',
+              onPressed: () => _showServerSettingsDialog(context),
+            ),
         ],
       ),
       body: SafeArea(

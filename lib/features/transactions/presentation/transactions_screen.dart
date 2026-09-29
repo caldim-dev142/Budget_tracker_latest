@@ -175,7 +175,17 @@ class _EntriesList extends ConsumerWidget {
         final catMap = catsAsync.valueOrNull ?? {};
 
         final filteredList = list.where((entry) {
-          final catName = (catMap[entry.categoryId] ?? entry.categoryId).toLowerCase();
+          var rawCat = catMap[entry.categoryId] ?? '';
+          if (rawCat.isEmpty && (entry.categoryId.contains('-cat-') || entry.categoryId.contains('-custom-'))) {
+            final catIdx = entry.categoryId.indexOf('-cat-');
+            final customIdx = entry.categoryId.indexOf('-custom-');
+            final cleanId = catIdx != -1
+                ? entry.categoryId.substring(catIdx + 1)
+                : entry.categoryId.substring(customIdx + 1);
+            rawCat = catMap[cleanId] ?? '';
+          }
+          // Never search by raw ID — use 'uncategorized' so orphan entries are findable
+          final catName = (rawCat.isNotEmpty ? rawCat : 'uncategorized').toLowerCase();
           final noteMatch = entry.note?.toLowerCase().contains(search) ?? false;
           return search.isEmpty || noteMatch || catName.contains(search);
         }).toList()
@@ -305,14 +315,29 @@ class _EntryTile extends ConsumerWidget {
     final tzOffset = ref.watch(timezoneOffsetProvider);
     final amount = Money(entry.amountPaise);
 
-    final rawCatName = catMap[entry.categoryId] ?? '';
+    var rawCatName = catMap[entry.categoryId] ?? '';
+    if (rawCatName.isEmpty && (entry.categoryId.contains('-cat-') || entry.categoryId.contains('-custom-'))) {
+      final catIdx = entry.categoryId.indexOf('-cat-');
+      final customIdx = entry.categoryId.indexOf('-custom-');
+      final cleanId = catIdx != -1
+          ? entry.categoryId.substring(catIdx + 1)
+          : entry.categoryId.substring(customIdx + 1);
+      rawCatName = catMap[cleanId] ?? '';
+    }
+
+    // When category is not found in local DB (e.g. interrupted sync), show a clear
+    // placeholder instead of leaking the raw database ID to the user.
+    final categoryMissing = rawCatName.isEmpty;
     final catName = (entry.note != null && entry.note!.isNotEmpty)
         ? entry.note!
-        : (rawCatName.isNotEmpty ? rawCatName : entry.categoryId);
+        : (rawCatName.isNotEmpty ? rawCatName : 'Uncategorized');
 
     final iconColor = categoryIconColor(entry.kind);
     final badgeBg = iconColor.withValues(alpha: 0.14);
-    final iconData = categoryIcon(rawCatName.isNotEmpty ? rawCatName : catName, entry.kind);
+    // Use a neutral help-outline icon for orphaned/missing categories
+    final iconData = categoryMissing && (entry.note == null || entry.note!.isEmpty)
+        ? Icons.help_outline_rounded
+        : categoryIcon(rawCatName.isNotEmpty ? rawCatName : catName, entry.kind);
 
     final Color amountColor = switch (entry.kind) {
       'income' => const Color(0xFF00A887),
@@ -323,6 +348,7 @@ class _EntryTile extends ConsumerWidget {
     };
 
     final formattedDate = formatDateShort(entry.entryDate.toUtc(), tzOffset);
+    final formattedTime = formatTime(entry.entryDate.toUtc(), tzOffset);
 
     return Dismissible(
       key: Key(entry.id),
@@ -405,14 +431,28 @@ class _EntryTile extends ConsumerWidget {
                   ],
                 ),
               ),
-              MoneyText(
-                amount,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: amountColor,
-                      fontSize: 16,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  MoneyText(
+                    amount,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: amountColor,
+                          fontSize: 16,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    formattedTime,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: cs.onSurfaceVariant.withValues(alpha: 0.55),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -437,6 +477,17 @@ String _fmtDay(DateTime d) =>
 final _categoriesMapProvider = StreamProvider<Map<String, String>>((ref) {
   final db = ref.watch(appDatabaseProvider);
   return db.categoryDao.watchAll().map((cats) {
-    return {for (final c in cats) c.id: c.name};
+    final map = <String, String>{};
+    for (final c in cats) {
+      map[c.id] = c.name;
+      final catIdx = c.id.indexOf('-cat-');
+      final customIdx = c.id.indexOf('-custom-');
+      if (catIdx != -1) {
+        map[c.id.substring(catIdx + 1)] = c.name;
+      } else if (customIdx != -1) {
+        map[c.id.substring(customIdx + 1)] = c.name;
+      }
+    }
+    return map;
   });
 });

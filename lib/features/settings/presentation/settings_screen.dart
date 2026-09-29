@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:flutter/foundation.dart' show kReleaseMode, kDebugMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -175,16 +175,18 @@ class SettingsScreen extends ConsumerWidget {
           // reinstall the app.
           const _BackupStatusBanner(),
 
-          // Server Connection
-          const SizedBox(height: 12),
-          const _SectionHeader('Server Connection'),
-          _SettingsTile(
-            icon: Icons.cloud_queue_outlined,
-            title: 'Backend Server URL',
-            subtitle: ref.watch(serverUrlProvider),
-            trailing: const Icon(Icons.edit_outlined, size: 18),
-            onTap: () => _showServerUrlDialog(context, ref),
-          ),
+          if (kDebugMode) ...[
+            // Server Connection
+            const SizedBox(height: 12),
+            const _SectionHeader('Server Connection'),
+            _SettingsTile(
+              icon: Icons.cloud_queue_outlined,
+              title: 'Backend Server URL',
+              subtitle: ref.watch(serverUrlProvider),
+              trailing: const Icon(Icons.edit_outlined, size: 18),
+              onTap: () => _showServerUrlDialog(context, ref),
+            ),
+          ],
 
           // Security
           const SizedBox(height: 12),
@@ -536,8 +538,10 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showEditCategoryDialog(BuildContext context, WidgetRef ref, CategoriesTableData cat) {
-    final nameCtrl = TextEditingController(text: cat.name);
-    final groupCtrl = TextEditingController(text: cat.groupCode ?? '');
+    final categoryCtrl = TextEditingController(
+      text: (cat.groupCode != null && cat.groupCode!.isNotEmpty) ? cat.groupCode : cat.name,
+    );
+    final subcatCtrl = TextEditingController(text: cat.name);
     String kind = cat.kind;
     String needOrWant = cat.needOrWant ?? 'need';
 
@@ -545,7 +549,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
-          final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+          final liveIcon = categoryIcon(subcatCtrl.text.isNotEmpty ? subcatCtrl.text : categoryCtrl.text, kind, categoryCtrl.text);
           final liveColor = categoryIconColor(kind);
 
           return AlertDialog(
@@ -586,7 +590,7 @@ class SettingsScreen extends ConsumerWidget {
                                 ),
                               ),
                               Text(
-                                nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                categoryCtrl.text.trim().isEmpty ? 'Type name to generate' : categoryCtrl.text.trim(),
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -599,19 +603,19 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 14),
                   TextField(
-                    controller: nameCtrl,
+                    controller: categoryCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Category Name *',
-                      hintText: 'e.g. Groceries, Fuel, Netflix',
+                      labelText: 'Category *',
+                      hintText: 'e.g. Groceries',
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 12),
                   TextField(
-                    controller: groupCtrl,
+                    controller: subcatCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'Subcategory / Group',
-                      hintText: 'e.g. Food & Dining, Travel, Bills',
+                      labelText: 'Subcategory',
+                      hintText: 'e.g. Food & Dining',
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
@@ -651,19 +655,22 @@ class SettingsScreen extends ConsumerWidget {
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
               FilledButton(
                 onPressed: () async {
-                  final name = nameCtrl.text.trim();
-                  final group = groupCtrl.text.trim();
-                  if (name.isEmpty) {
+                  final category = categoryCtrl.text.trim();
+                  final subcat = subcatCtrl.text.trim();
+                  if (category.isEmpty) {
                     AppFeedback.showWarning(context, 'Please enter a category name.');
                     return;
                   }
+
+                  final finalGroup = category;
+                  final finalName = subcat.isNotEmpty ? subcat : category;
 
                   try {
                     final db = ref.read(appDatabaseProvider);
                     await (db.update(db.categoriesTable)..where((c) => c.id.equals(cat.id)))
                         .write(CategoriesTableCompanion(
-                      name: Value(name),
-                      groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
+                      name: Value(finalName),
+                      groupCode: Value(finalGroup),
                       kind: Value(kind),
                       needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
                     ));
@@ -689,8 +696,8 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showAddCategoryDialog(BuildContext context, WidgetRef ref) {
-    final nameCtrl = TextEditingController();
-    final groupCtrl = TextEditingController();
+    final categoryCtrl = TextEditingController();
+    final subcatCtrl = TextEditingController();
     String kind = 'spending';
     String needOrWant = 'need';
 
@@ -699,7 +706,7 @@ class SettingsScreen extends ConsumerWidget {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            final liveIcon = categoryIcon(nameCtrl.text, kind, groupCtrl.text);
+            final liveIcon = categoryIcon(subcatCtrl.text.isNotEmpty ? subcatCtrl.text : categoryCtrl.text, kind, categoryCtrl.text);
             final liveColor = categoryIconColor(kind);
 
             return AlertDialog(
@@ -740,7 +747,7 @@ class SettingsScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 Text(
-                                  nameCtrl.text.trim().isEmpty ? 'Type name to generate' : nameCtrl.text.trim(),
+                                  categoryCtrl.text.trim().isEmpty ? 'Type name to generate' : categoryCtrl.text.trim(),
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -753,19 +760,19 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 14),
                     TextField(
-                      controller: nameCtrl,
+                      controller: categoryCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Category Name *',
-                        hintText: 'e.g. Groceries, Fuel, Netflix',
+                        labelText: 'Category *',
+                        hintText: 'e.g. Groceries',
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: groupCtrl,
+                      controller: subcatCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Subcategory / Group',
-                        hintText: 'e.g. Food & Dining, Travel, Bills',
+                        labelText: 'Subcategory',
+                        hintText: 'e.g. Food & Dining',
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
@@ -808,12 +815,15 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 FilledButton(
                   onPressed: () async {
-                    final name = nameCtrl.text.trim();
-                    final group = groupCtrl.text.trim();
-                    if (name.isEmpty) {
+                    final category = categoryCtrl.text.trim();
+                    final subcat = subcatCtrl.text.trim();
+                    if (category.isEmpty) {
                       AppFeedback.showWarning(context, 'Please enter a category name.');
                       return;
                     }
+
+                    final finalGroup = category;
+                    final finalName = subcat.isNotEmpty ? subcat : category;
 
                     try {
                       final db = ref.read(appDatabaseProvider);
@@ -827,8 +837,8 @@ class SettingsScreen extends ConsumerWidget {
                           id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
                           householdId: householdId,
                           kind: kind,
-                          groupCode: group.isNotEmpty ? Value(group) : const Value.absent(),
-                          name: name,
+                          groupCode: Value(finalGroup),
+                          name: finalName,
                           needOrWant: kind == 'spending' ? Value(needOrWant) : const Value.absent(),
                           isDeduction: const Value(false),
                           isSystem: const Value(false),
@@ -841,7 +851,7 @@ class SettingsScreen extends ConsumerWidget {
                       if (context.mounted) {
                         Navigator.pop(context); // Close add category dialog
                         Navigator.pop(context); // Close bottom sheet
-                        AppFeedback.showSuccess(context, 'Custom category "$name" added!');
+                        AppFeedback.showSuccess(context, 'Custom category "$finalName" added!');
                       }
                     } catch (e) {
                       if (context.mounted) {
@@ -861,16 +871,33 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _exportToCsv(BuildContext context, WidgetRef ref) async {
     final db = ref.read(appDatabaseProvider);
-    // DEF-DATA-05: export only the active household's live (not soft-deleted) entries.
-    final householdId = ref.read(authStateProvider).valueOrNull?.householdId ?? 'local';
-    final entries = await (db.select(db.entriesTable)
-          ..where((e) => e.householdId.equals(householdId) & e.deletedAt.isNull())
-          ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
-        .get();
-    final categoryNames = {
-      for (final c in await (db.select(db.categoriesTable)..where((c) => c.householdId.equals(householdId))).get())
-        c.id: c.name,
-    };
+    final authHouseholdId = ref.read(authStateProvider).valueOrNull?.householdId;
+
+    // Load non-deleted entries. Match active household, and include 'local' entries if present.
+    List<EntriesTableData> entries;
+    if (authHouseholdId != null && authHouseholdId.isNotEmpty && authHouseholdId != 'local') {
+      entries = await (db.select(db.entriesTable)
+            ..where((e) =>
+                (e.householdId.equals(authHouseholdId) | e.householdId.equals('local')) &
+                e.deletedAt.isNull())
+            ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+          .get();
+      if (entries.isEmpty) {
+        // Fallback: any live entries in the database
+        entries = await (db.select(db.entriesTable)
+              ..where((e) => e.deletedAt.isNull())
+              ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+            .get();
+      }
+    } else {
+      entries = await (db.select(db.entriesTable)
+            ..where((e) => e.deletedAt.isNull())
+            ..orderBy([(e) => OrderingTerm.asc(e.entryDate)]))
+          .get();
+    }
+
+    final allCategories = await db.select(db.categoriesTable).get();
+    final categoryNames = {for (final c in allCategories) c.id: c.name};
 
     if (entries.isEmpty) {
       if (context.mounted) {
@@ -889,10 +916,12 @@ class SettingsScreen extends ConsumerWidget {
 
     csvBuffer.writeln('ID,Date,Category,Type,Amount (Paise),Note');
     for (final e in entries) {
+      final catName = categoryNames[e.categoryId] ??
+          (e.categoryId.isNotEmpty ? e.categoryId : 'Uncategorized');
       csvBuffer.writeln([
         csvField(e.id),
         e.entryDate.toIso8601String().split('T').first,
-        csvField(categoryNames[e.categoryId] ?? e.categoryId),
+        csvField(catName),
         csvField(e.kind),
         e.amountPaise.toString(),
         csvField(e.note),
@@ -900,10 +929,17 @@ class SettingsScreen extends ConsumerWidget {
     }
 
     try {
-      final resultPath = await exportCsv(csvBuffer.toString());
+      final now = DateTime.now();
+      final dateStr =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final fileName = 'budget_tracker_export_$dateStr.csv';
+      final resultPath = await exportCsv(csvBuffer.toString(), fileName: fileName);
 
       if (context.mounted) {
-        AppFeedback.showSuccess(context, 'Exported to CSV successfully: $resultPath');
+        AppFeedback.showSuccess(
+          context,
+          'Exported ${entries.length} entries to CSV!\n$resultPath',
+        );
       }
     } catch (e) {
       if (context.mounted) {
@@ -978,7 +1014,7 @@ class SettingsScreen extends ConsumerWidget {
     try {
       final outcome = await syncService.syncAllQueue(
         cancelToken: cancelToken,
-        timeout: const Duration(seconds: 30),
+        timeout: const Duration(seconds: 60),
       );
 
       dismissDialog();

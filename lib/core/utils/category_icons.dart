@@ -145,7 +145,7 @@ IconData? _matchSemanticIcon(String input) {
 
   // ── Shopping & Clothing ───────────────────────────────────────────────────
   if (_contains(n, ['clothing', 'clothes', 'apparel', 'fashion', 'wear', 'shirt', 'dress', 'jeans', 't-shirt', 'jacket', 'saree', 'kurta', 'shoes', 'footwear', 'sneakers'])) return Icons.checkroom_rounded;
-  if (_contains(n, ['electronics', 'gadget', 'device', 'phone purchase', 'smartphone', 'laptop', 'tablet', 'ipad', 'headphones', 'earphones', 'charger', 'tv', 'monitor'])) return Icons.devices_rounded;
+  if (_contains(n, ['electronic', 'electronics', 'gadget', 'device', 'phone purchase', 'smartphone', 'laptop', 'tablet', 'ipad', 'headphones', 'earphones', 'pod', 'pods', 'airpod', 'airpods', 'earbuds', 'charger', 'tv', 'monitor'])) return Icons.devices_rounded;
   if (_contains(n, ['shopping', 'purchase', 'buy', 'online shop', 'amazon', 'flipkart', 'myntra', 'mall'])) return Icons.shopping_bag_rounded;
   if (_contains(n, ['accessories', 'jewellery', 'jewelry', 'gold', 'silver', 'diamond', 'ring', 'necklace', 'watch', 'wrist watch'])) return Icons.diamond_rounded;
   if (_contains(n, ['gift', 'presents', 'gifting', 'surprise'])) return Icons.card_giftcard_rounded;
