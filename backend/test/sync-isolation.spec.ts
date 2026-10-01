@@ -11,68 +11,41 @@ describe('Phase 2 — Sync Service Multi-Tenant Isolation & Completeness', () =>
       upsertBatch: jest.fn().mockResolvedValue({ synced: 1, failed: 0 }),
     };
 
+    const createModelMock = (extra?: Record<string, any>) => {
+      const findUnique = jest.fn().mockResolvedValue(null);
+      const findFirst = jest.fn().mockResolvedValue(null);
+      const findMany = jest.fn().mockImplementation(async (args?: any) => {
+        const inIds = args?.where?.id?.in;
+        if (Array.isArray(inIds)) {
+          const rows: any[] = [];
+          for (const id of inIds) {
+            const row = await findUnique({ where: { id } });
+            if (row) rows.push(row);
+          }
+          return rows;
+        }
+        const first = await findFirst(args);
+        if (first) return [first];
+        return [];
+      });
+      return { findUnique, findFirst, findMany, upsert: jest.fn(), ...extra };
+    };
+
     mockPrisma = {
-      category: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      account: {
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
-        upsert: jest.fn(),
-      },
-      creditCard: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-        create: jest.fn(),
-      },
-      cardTransaction: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      plannedBill: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      receivable: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      savingGoal: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      goalContribution: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      sinkingFund: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      fundMovement: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      budget: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-      },
-      reserveLine: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      annual_targets: {
-        findUnique: jest.fn(),
-        upsert: jest.fn(),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      entry: {
-        findUnique: jest.fn(),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      // New models/methods used by tombstone sync (DEF-SYNC-01) and month status pull (DEF-SYNC-07)
+      category: createModelMock(),
+      account: createModelMock(),
+      creditCard: createModelMock({ create: jest.fn() }),
+      cardTransaction: createModelMock(),
+      plannedBill: createModelMock(),
+      receivable: createModelMock(),
+      savingGoal: createModelMock(),
+      goalContribution: createModelMock(),
+      sinkingFund: createModelMock(),
+      fundMovement: createModelMock(),
+      budget: createModelMock(),
+      reserveLine: createModelMock(),
+      annual_targets: createModelMock(),
+      entry: createModelMock(),
       syncTombstone: {
         findMany: jest.fn().mockResolvedValue([]),
         upsert: jest.fn(),
@@ -80,6 +53,7 @@ describe('Phase 2 — Sync Service Multi-Tenant Isolation & Completeness', () =>
       monthSnapshot: {
         findMany: jest.fn().mockResolvedValue([]),
       },
+      $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
     };
 
     syncService = new SyncService(mockEntriesService, mockPrisma);

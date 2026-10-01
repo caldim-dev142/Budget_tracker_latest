@@ -77,6 +77,25 @@ export interface ValidEntryWrite {
   data: any;
 }
 
+export interface BatchContext {
+  createdAccountIds?: Set<string>;
+  createdCardIds?: Set<string>;
+  createdEntryIds?: Set<string>;
+}
+
+export async function findManyBatch<T = any>(
+  model: any,
+  ids: string[],
+  whereExtra?: any,
+  include?: any,
+): Promise<T[]> {
+  if (!model || ids.length === 0) return [];
+  return model.findMany({
+    where: { id: { in: ids }, ...(whereExtra ?? {}) },
+    ...(include ? { include } : {}),
+  });
+}
+
 @Injectable()
 export class EntriesService {
   constructor(@Inject('PRISMA') private readonly prisma: PrismaClient) {}
@@ -100,9 +119,15 @@ export class EntriesService {
 
   /**
    * Phase 1: Validate a batch of entries without performing database writes.
-   * Returns valid entry write operations, needed categories to ensure, and counts of synced vs rejected entries.
+   * Returns valid entry write operations, needed categories to ensure, counts of synced vs rejected entries,
+   * and rejected entries with reasons.
    */
-  async validateBatch(householdId: string, entries: CreateEntryDto[], userId: string) {
+  async validateBatch(
+    householdId: string,
+    entries: CreateEntryDto[],
+    userId: string,
+    batchContext?: BatchContext,
+  ) {
     const neededCategories = new Map<string, { kind: string; name: string }>();
     for (const dto of entries) {
       const categoryId = normalizeCategoryId(dto.categoryId, householdId);
@@ -114,10 +139,69 @@ export class EntriesService {
       }
     }
 
-    const validWrites: ValidEntryWrite[] = [];
-    let syncedCount = 0;
-    let failedCount = 0;
+    const createdAccountIds = batchContext?.createdAccountIds ?? new Set<string>();
+    const createdCardIds = batchContext?.createdCardIds ?? new Set<string>();
 
+    // Batch lookups for referenced records
+    const entryIds = entries.map((e) => e.id).filter(Boolean);
+    const referencedAccountIds = [...new Set(entries.map((e) => e.accountId).filter(Boolean) as string[])];
+    const referencedCardIds = [...new Set(entries.map((e) => e.cardId).filter(Boolean) as string[])];
+    const referencedParentIds = [...new Set(entries.map((e) => e.parentId).filter(Boolean) as string[])];
+    const referencedCategoryIds = [
+      ...new Set(
+        entries
+          .map((e) => normalizeCategoryId(e.categoryId, householdId))
+          .filter(Boolean) as string[],
+      ),
+    ];
+
+    const [existingEntries, existingAccounts, existingCards, existingParents, existingCategories] =
+      await Promise.all([
+        findManyBatch(this.prisma.entry, entryIds),
+        findManyBatch(this.prisma.account, referencedAccountIds),
+        findManyBatch(this.prisma.creditCard, referencedCardIds),
+        findManyBatch(this.prisma.entry, referencedParentIds),
+        findManyBatch(this.prisma.category, referencedCategoryIds),
+      ]);
+
+    const entriesMap = new Map(existingEntries.map((e: any) => [e.id, e]));
+    const accountsMap = new Map(existingAccounts.map((a: any) => [a.id, a]));
+    const cardsMap = new Map(existingCards.map((c: any) => [c.id, c]));
+    const parentsMap = new Map(existingParents.map((p: any) => [p.id, p]));
+    const categoriesMap = new Map(existingCategories.map((c: any) => [c.id, c]));
+
+    // Batched closed-month lookup: collect all unique yearMonths and query once
+    const allMonthsToCheck = new Set<string>();
+    for (const dto of entries) {
+      if (dto.entryDate && typeof dto.entryDate === 'string' && dto.entryDate.length >= 7) {
+        allMonthsToCheck.add(dto.entryDate.substring(0, 7));
+      }
+      const existing = entriesMap.get(dto.id);
+      if (existing?.entryDate instanceof Date) {
+        allMonthsToCheck.add(existing.entryDate.toISOString().substring(0, 7));
+      } else if (typeof existing?.entryDate === 'string' && existing.entryDate.length >= 7) {
+        allMonthsToCheck.add(existing.entryDate.substring(0, 7));
+      }
+    }
+
+    const closedMonths = new Set<string>();
+    if (allMonthsToCheck.size > 0 && typeof (this.prisma as any).monthSnapshot?.findMany === 'function') {
+      const closedSnaps = await (this.prisma as any).monthSnapshot.findMany({
+        where: {
+          householdId,
+          yearMonth: { in: Array.from(allMonthsToCheck) },
+          status: 'closed',
+        },
+        select: { yearMonth: true },
+      });
+      if (Array.isArray(closedSnaps)) {
+        for (const snap of closedSnaps) {
+          closedMonths.add(snap.yearMonth);
+        }
+      }
+    }
+
+    // Pass 1: Validate everything except parentId existence
     const results = await Promise.allSettled(
       entries.map(async (dto) => {
         // Map categoryId to database format (householdId-categoryId) if needed
@@ -134,7 +218,7 @@ export class EntriesService {
           throw new BadRequestException('Only adjustments and income deductions may be negative.');
         }
 
-        const existing = await this.prisma.entry.findUnique({ where: { id: dto.id } });
+        const existing = entriesMap.get(dto.id);
         if (existing && existing.householdId !== householdId) {
           throw new ForbiddenException(`Access denied: Entry ${dto.id} belongs to a different household.`);
         }
@@ -147,16 +231,16 @@ export class EntriesService {
           return { type: 'noop', id: dto.id };
         }
 
-        // Closed month guard: both the month the entry currently belongs to and the month it
-        // would move to must be open (changing the date must not bypass the guard).
-        const monthsToCheck = new Set<string>([dto.entryDate.substring(0, 7)]);
-        if (existing?.entryDate instanceof Date) monthsToCheck.add(existing.entryDate.toISOString().substring(0, 7));
+        // Closed month guard: both current month and target month must be open
+        const monthsToCheck = [dto.entryDate.substring(0, 7)];
+        const existingMonth = existing?.entryDate instanceof Date
+          ? existing.entryDate.toISOString().substring(0, 7)
+          : (typeof existing?.entryDate === 'string' && existing.entryDate.length >= 7 ? existing.entryDate.substring(0, 7) : null);
+        if (existingMonth && !monthsToCheck.includes(existingMonth)) {
+          monthsToCheck.push(existingMonth);
+        }
         for (const ym of monthsToCheck) {
-          const monthSnap = await (this.prisma as any).monthSnapshot?.findUnique?.({
-            where: { householdId_yearMonth: { householdId, yearMonth: ym } },
-            select: { status: true },
-          });
-          if (monthSnap && monthSnap.status === 'closed') {
+          if (closedMonths.has(ym)) {
             throw new BadRequestException(
               `Cannot modify entries in closed month ${ym}. Month has been closed.`,
             );
@@ -165,7 +249,7 @@ export class EntriesService {
 
         // Ensure category exists and belongs to this household
         if (categoryId) {
-          const catExists = await this.prisma.category.findUnique({ where: { id: categoryId } });
+          const catExists = categoriesMap.get(categoryId);
           if (catExists && catExists.householdId && catExists.householdId !== householdId) {
             throw new ForbiddenException(`Category ${categoryId} belongs to a different household.`);
           }
@@ -173,18 +257,33 @@ export class EntriesService {
 
         // Validate accountId if provided
         if (dto.accountId) {
-          const accExists = await this.prisma.account.findUnique({ where: { id: dto.accountId } });
+          const accExists = accountsMap.get(dto.accountId);
           if (accExists && accExists.householdId && accExists.householdId !== householdId) {
             throw new ForbiddenException(`Account ${dto.accountId} belongs to a different household.`);
+          }
+          if (!accExists && !createdAccountIds.has(dto.accountId)) {
+            throw new BadRequestException(`Referenced account ${dto.accountId} does not exist.`);
           }
         }
 
         // Validate cardId if provided
         if (dto.cardId) {
-          const cardExists = await this.prisma.creditCard.findUnique({ where: { id: dto.cardId } });
+          const cardExists = cardsMap.get(dto.cardId);
           if (cardExists && cardExists.householdId && cardExists.householdId !== householdId) {
             throw new ForbiddenException(`Credit card ${dto.cardId} belongs to a different household.`);
           }
+          if (!cardExists && !createdCardIds.has(dto.cardId)) {
+            throw new BadRequestException(`Referenced credit card ${dto.cardId} does not exist.`);
+          }
+        }
+
+        // Validate parentId household if existing in DB
+        if (dto.parentId) {
+          const parentExists = parentsMap.get(dto.parentId);
+          if (parentExists && parentExists.householdId && parentExists.householdId !== householdId) {
+            throw new ForbiddenException(`Parent entry ${dto.parentId} belongs to a different household.`);
+          }
+          // Note: parent existence check is deferred to Pass 2
         }
 
         if (existing) {
@@ -207,7 +306,7 @@ export class EntriesService {
               action: 'update' as const,
               id: dto.id,
               data: {
-                categoryId,
+                categoryId: categoryId,
                 kind: dto.kind,
                 accountId: dto.accountId ?? null,
                 cardId: dto.cardId ?? null,
@@ -250,23 +349,64 @@ export class EntriesService {
       }),
     );
 
+    const acceptedEntriesMap = new Map<
+      string,
+      { dto: CreateEntryDto; value: any }
+    >();
+    const rejected: Array<{ id: string; reason: string }> = [];
+    let failedCount = 0;
+
     results.forEach((r, idx) => {
+      const entryId = entries[idx]?.id;
       if (r.status === 'fulfilled') {
-        syncedCount++;
-        if (r.value.type === 'write') {
-          validWrites.push(r.value.write);
-        }
+        acceptedEntriesMap.set(entryId, { dto: entries[idx], value: r.value });
       } else {
         failedCount++;
-        console.error(`Failed to validate entry ${entries[idx]?.id}:`, (r as PromiseRejectedResult).reason);
+        const reason = (r as PromiseRejectedResult).reason?.message || 'Validation failed';
+        rejected.push({ id: entryId, reason });
+        console.error(`Failed to validate entry ${entryId}:`, (r as PromiseRejectedResult).reason);
       }
     });
+
+    // Pass 2: Cascading parentId validation
+    // Rejects any entry whose parentId is not in the DB and not among the entries accepted in pass 1.
+    // Repeat until nothing changes (handles arbitrary chains).
+    const acceptedEntryIds = new Set(acceptedEntriesMap.keys());
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [id, { dto }] of Array.from(acceptedEntriesMap.entries())) {
+        if (dto.parentId) {
+          const parentInDb = parentsMap.has(dto.parentId);
+          const parentInBatch = acceptedEntryIds.has(dto.parentId);
+          if (!parentInDb && !parentInBatch) {
+            acceptedEntriesMap.delete(id);
+            acceptedEntryIds.delete(id);
+            failedCount++;
+            const reason = `Referenced parent entry ${dto.parentId} does not exist.`;
+            rejected.push({ id, reason });
+            console.error(`Failed to validate entry ${id}:`, reason);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    const validWrites: ValidEntryWrite[] = [];
+    let syncedCount = 0;
+    for (const { value } of acceptedEntriesMap.values()) {
+      syncedCount++;
+      if (value.type === 'write') {
+        validWrites.push(value.write);
+      }
+    }
 
     return {
       validWrites,
       neededCategories,
       syncedCount,
       failedCount,
+      rejected,
     };
   }
 
@@ -326,7 +466,34 @@ export class EntriesService {
       }
     }
 
-    for (const item of validWrites) {
+    // In applyBatch, write parents before children: sort validWrites so any entry whose parentId is also in validWrites comes after its parent.
+    const sortedWrites: ValidEntryWrite[] = [];
+    const writeIds = new Set(validWrites.map((w) => w.id));
+    const visited = new Set<string>();
+    const visiting = new Set<string>();
+    const writeMap = new Map(validWrites.map((w) => [w.id, w]));
+
+    function visit(w: ValidEntryWrite) {
+      if (visited.has(w.id)) return;
+      if (visiting.has(w.id)) return;
+      visiting.add(w.id);
+      const parentId = w.data?.parentId;
+      if (parentId && writeIds.has(parentId)) {
+        const parentWrite = writeMap.get(parentId);
+        if (parentWrite) {
+          visit(parentWrite);
+        }
+      }
+      visiting.delete(w.id);
+      visited.add(w.id);
+      sortedWrites.push(w);
+    }
+
+    for (const w of validWrites) {
+      visit(w);
+    }
+
+    for (const item of sortedWrites) {
       if (item.action === 'create') {
         await tx.entry.create({ data: item.data });
       } else {
@@ -358,6 +525,7 @@ export class EntriesService {
     return {
       synced: validation.syncedCount,
       failed: validation.failedCount,
+      rejected: validation.rejected,
     };
   }
 

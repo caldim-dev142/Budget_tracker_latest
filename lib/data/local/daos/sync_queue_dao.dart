@@ -39,6 +39,7 @@ class SyncQueueDao extends DatabaseAccessor<AppDatabase> with _$SyncQueueDaoMixi
     'fund_movement',
     'annual_target',
     'category',
+    'recurring_rule',
   };
 
   /// Records a hard deletion so the next push sends it in `deletions[]` (DEF-SYNC-01).

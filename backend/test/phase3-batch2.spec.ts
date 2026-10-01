@@ -14,99 +14,74 @@ describe('Phase 3 Batch 2 — Transactional Sync Batch & Month Close (D3, D4)', 
     let mockPrisma: any;
     let mockTx: any;
 
+    const createModelMock = (extra?: Record<string, any>) => {
+      const findUnique = jest.fn().mockResolvedValue(null);
+      const findFirst = jest.fn().mockResolvedValue(null);
+      const findMany = jest.fn().mockImplementation(async (args?: any) => {
+        const inIds = args?.where?.id?.in;
+        if (Array.isArray(inIds)) {
+          const rows: any[] = [];
+          for (const id of inIds) {
+            const row = await findUnique({ where: { id } });
+            if (row) rows.push(row);
+          }
+          return rows;
+        }
+        const first = await findFirst(args);
+        if (first) return [first];
+        return [];
+      });
+      return { findUnique, findFirst, findMany, upsert: jest.fn().mockResolvedValue({}), ...extra };
+    };
+
     beforeEach(() => {
       mockTx = {
-        category: {
+        category: createModelMock({
           count: jest.fn().mockResolvedValue(10),
           findUnique: jest.fn().mockResolvedValue({ id: 'cat-1', householdId }),
-          upsert: jest.fn().mockResolvedValue({}),
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           createMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        account: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          findFirst: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
-        creditCard: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          create: jest.fn().mockResolvedValue({}),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
-        cardTransaction: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        plannedBill: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        receivable: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        savingGoal: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
-        goalContribution: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        sinkingFund: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
-        fundMovement: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        budget: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          findFirst: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          update: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        reserveLine: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        annual_targets: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          upsert: jest.fn().mockResolvedValue({}),
-          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        entry: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          create: jest.fn().mockResolvedValue({}),
-          update: jest.fn().mockResolvedValue({}),
-        },
+        }),
+        account: createModelMock(),
+        creditCard: createModelMock({ create: jest.fn().mockResolvedValue({}) }),
+        cardTransaction: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        plannedBill: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        receivable: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        savingGoal: createModelMock(),
+        goalContribution: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        sinkingFund: createModelMock(),
+        fundMovement: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        budget: createModelMock({ update: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        reserveLine: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        annual_targets: createModelMock({ deleteMany: jest.fn().mockResolvedValue({ count: 1 }) }),
+        entry: createModelMock({ create: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) }),
         syncTombstone: {
           upsert: jest.fn().mockResolvedValue({}),
         },
       };
 
+      const monthFindUnique = jest.fn().mockResolvedValue(null);
       mockPrisma = {
         ...mockTx,
-        category: {
-          count: jest.fn().mockResolvedValue(10),
-          findUnique: jest.fn().mockResolvedValue({ id: 'cat-1', householdId }),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
+        category: mockTx.category,
         syncTombstone: {
           findMany: jest.fn().mockResolvedValue([]),
           upsert: jest.fn().mockResolvedValue({}),
         },
         monthSnapshot: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          findMany: jest.fn().mockResolvedValue([]),
+          findUnique: monthFindUnique,
+          findMany: jest.fn().mockImplementation(async (args?: any) => {
+            const inMonths = args?.where?.yearMonth?.in;
+            if (Array.isArray(inMonths)) {
+              const rows: any[] = [];
+              for (const ym of inMonths) {
+                const row = await monthFindUnique({ where: { householdId_yearMonth: { householdId, yearMonth: ym } } });
+                if (row) rows.push({ ...row, yearMonth: ym });
+              }
+              return rows;
+            }
+            return [];
+          }),
         },
         $transaction: jest.fn(async (cb: any) => cb(mockTx)),
       };

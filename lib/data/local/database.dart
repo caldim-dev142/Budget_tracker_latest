@@ -11,6 +11,7 @@ import 'daos/goal_dao.dart';
 import 'daos/card_dao.dart';
 import 'daos/account_dao.dart';
 import 'daos/borrow_lend_dao.dart';
+import 'daos/recurring_rule_dao.dart';
 import 'connection/connection.dart';
 
 part 'database.g.dart';
@@ -38,6 +39,7 @@ part 'database.g.dart';
     SyncQueueTable,
     AnnualTargetsTable,
     UsersTable,
+    RecurringRulesTable,
   ],
   daos: [
     EntryDao,
@@ -49,13 +51,14 @@ part 'database.g.dart';
     CardDao,
     AccountDao,
     BorrowLendDao,
+    RecurringRuleDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -97,6 +100,10 @@ class AppDatabase extends _$AppDatabase {
               );
             ''');
           } catch (_) {}
+        }
+        if (from < 5) {
+          // Schema v5: create recurring_rules table (no try/catch — failures must surface)
+          await m.createTable(recurringRulesTable);
         }
         // Ensure 'local' bootstrap household has its system categories after any upgrade.
         // Auth household system cats are seeded by ensureUserHouseholdSeed() on login.

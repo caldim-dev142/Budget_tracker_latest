@@ -9,17 +9,25 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
     mockPrisma = {
       category: {
         count: jest.fn().mockResolvedValue(10),
-        findUnique: jest.fn().mockResolvedValue({ id: 'cat-1' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'cat-1', householdId: 'household-A' }),
+        findMany: jest.fn().mockResolvedValue([{ id: 'cat-1', householdId: 'household-A' }]),
         create: jest.fn(),
+      },
+      account: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      creditCard: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
       entry: {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       monthSnapshot: {
         findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
 
@@ -27,7 +35,7 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
   });
 
   it('allows user in Household A to create an entry', async () => {
-    mockPrisma.entry.findUnique.mockResolvedValue(null);
+    mockPrisma.entry.findMany.mockResolvedValue([]);
     mockPrisma.entry.create.mockResolvedValue({
       id: 'entry-101',
       householdId: 'household-A',
@@ -62,12 +70,14 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
   });
 
   it('allows user in Household A to update their own existing entry', async () => {
-    mockPrisma.entry.findUnique.mockResolvedValue({
-      id: 'entry-101',
-      householdId: 'household-A',
-      amountPaise: 50000,
-      version: 1,
-    });
+    mockPrisma.entry.findMany.mockResolvedValue([
+      {
+        id: 'entry-101',
+        householdId: 'household-A',
+        amountPaise: 50000,
+        version: 1,
+      },
+    ]);
     mockPrisma.entry.update.mockResolvedValue({
       id: 'entry-101',
       householdId: 'household-A',
@@ -101,12 +111,14 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
   });
 
   it('rejects attempt by user in Household B to update Household A entry ID', async () => {
-    mockPrisma.entry.findUnique.mockResolvedValue({
-      id: 'entry-101',
-      householdId: 'household-A',
-      amountPaise: 50000,
-      version: 1,
-    });
+    mockPrisma.entry.findMany.mockResolvedValue([
+      {
+        id: 'entry-101',
+        householdId: 'household-A',
+        amountPaise: 50000,
+        version: 1,
+      },
+    ]);
 
     const result = await service.upsertBatch(
       'household-B', // User B is in Household B
@@ -129,9 +141,12 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
   });
 
   it('rejects creating or updating an entry in a closed month', async () => {
-    mockPrisma.monthSnapshot.findUnique.mockResolvedValue({
-      status: 'closed',
-    });
+    mockPrisma.monthSnapshot.findMany.mockResolvedValue([
+      {
+        yearMonth: '2026-01',
+        status: 'closed',
+      },
+    ]);
 
     const result = await service.upsertBatch(
       'household-A',
@@ -154,13 +169,14 @@ describe('EntriesService - Multi-Household Tenant Isolation', () => {
   });
 
   it('does not overwrite newer server entry if incoming version is stale', async () => {
-    mockPrisma.monthSnapshot.findUnique.mockResolvedValue(null);
-    mockPrisma.entry.findUnique.mockResolvedValue({
-      id: 'entry-v2',
-      householdId: 'household-A',
-      amountPaise: 50000,
-      version: 5, // Server has version 5
-    });
+    mockPrisma.entry.findMany.mockResolvedValue([
+      {
+        id: 'entry-v2',
+        householdId: 'household-A',
+        amountPaise: 50000,
+        version: 5, // Server has version 5
+      },
+    ]);
 
     const result = await service.upsertBatch(
       'household-A',

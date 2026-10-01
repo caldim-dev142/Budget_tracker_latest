@@ -153,11 +153,11 @@ describe('DEF-FIN-02 — lending system category id normalisation (₹7,000 regr
 
   it('a ₹7,000 lend entry (positive amount, as borrow_lend_dao sends it) is stored against the canonical deduction category so net adjustments = -700000', async () => {
     const prisma: any = {
-      category: { count: jest.fn().mockResolvedValue(1), findUnique: jest.fn().mockResolvedValue(null), upsert: jest.fn(), create: jest.fn().mockResolvedValue({}) },
-      entry: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn().mockImplementation(({ data }) => data) },
-      monthSnapshot: { findUnique: jest.fn().mockResolvedValue(null) },
-      account: { findUnique: jest.fn() },
-      creditCard: { findUnique: jest.fn() },
+      category: { count: jest.fn().mockResolvedValue(1), findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn(), create: jest.fn().mockResolvedValue({}) },
+      entry: { findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]), create: jest.fn().mockImplementation(({ data }) => data) },
+      monthSnapshot: { findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
+      account: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      creditCard: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     };
     await new EntriesService(prisma).upsertBatch(HH, [{
       id: 'e-lend', kind: 'adjustment', categoryId: `lend-system-cat-${HH}`, amountPaise: 700000,
@@ -184,11 +184,25 @@ describe('DEF-FIN-01 — seeded adjustment categories: exactly 4 ADD / 2 SUBTRAC
 
 describe('DEF-FIN-04 / DEF-SYNC-02/03 — entries upsert guards', () => {
   const base = () => ({
-    category: { count: jest.fn().mockResolvedValue(1), findUnique: jest.fn().mockResolvedValue({ id: `${HH}-spd-n05`, householdId: HH }), upsert: jest.fn(), create: jest.fn() },
-    entry: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn().mockImplementation(({ data }) => data) },
-    monthSnapshot: { findUnique: jest.fn().mockResolvedValue(null) },
-    account: { findUnique: jest.fn() },
-    creditCard: { findUnique: jest.fn() },
+    category: {
+      count: jest.fn().mockResolvedValue(1),
+      findUnique: jest.fn().mockResolvedValue({ id: `${HH}-spd-n05`, householdId: HH }),
+      findMany: jest.fn().mockResolvedValue([{ id: `${HH}-spd-n05`, householdId: HH }]),
+      upsert: jest.fn(),
+      create: jest.fn(),
+    },
+    entry: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(),
+      update: jest.fn().mockImplementation(({ data }) => data),
+    },
+    monthSnapshot: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    account: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+    creditCard: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   });
   const existing = { id: 'e1', householdId: HH, categoryId: `${HH}-spd-n05`, kind: 'spending', entryDate: new Date('2026-01-15T00:00:00Z'),
     amountPaise: 1000, note: null, parentId: null, accountId: null, cardId: null, deletedAt: null, version: 2 };
@@ -197,9 +211,8 @@ describe('DEF-FIN-04 / DEF-SYNC-02/03 — entries upsert guards', () => {
 
   it('moving an entry out of a closed month is rejected (date-change bypass)', async () => {
     const prisma: any = base();
-    prisma.entry.findUnique.mockResolvedValue(existing);
-    prisma.monthSnapshot.findUnique.mockImplementation(({ where }: any) =>
-      Promise.resolve(where.householdId_yearMonth.yearMonth === '2026-01' ? { status: 'closed' } : null));
+    prisma.entry.findMany.mockResolvedValue([existing]);
+    prisma.monthSnapshot.findMany.mockResolvedValue([{ yearMonth: '2026-01', status: 'closed' }]);
     const res = await new EntriesService(prisma).upsertBatch(HH, [{ ...existing, entryDate: '2026-02-15T00:00:00.000Z', amountPaise: 1000, version: 3, categoryId: 'spd-n05' } as any], 'u1');
     expect(prisma.entry.update).not.toHaveBeenCalled();
     expect(res).toBeDefined();
@@ -207,7 +220,7 @@ describe('DEF-FIN-04 / DEF-SYNC-02/03 — entries upsert guards', () => {
 
   it('negative spending is rejected; negative adjustment accepted', async () => {
     const prisma: any = base();
-    prisma.entry.findUnique.mockResolvedValue(null);
+    prisma.entry.findMany.mockResolvedValue([]);
     prisma.entry.create.mockImplementation(({ data }: any) => data);
     await new EntriesService(prisma).upsertBatch(HH, [
       { id: 'n1', kind: 'spending', categoryId: 'spd-n05', amountPaise: -1, entryDate: '2026-09-01T00:00:00Z' } as any,
@@ -219,7 +232,13 @@ describe('DEF-FIN-04 / DEF-SYNC-02/03 — entries upsert guards', () => {
 
   it('an update writes every mutable field (kind, category, date, amount, links)', async () => {
     const prisma: any = base();
-    prisma.entry.findUnique.mockResolvedValue(existing);
+    prisma.entry.findMany.mockImplementation(({ where }: any) => {
+      const ids: string[] = where?.id?.in || [];
+      const res: any[] = [];
+      if (ids.includes('e1')) res.push(existing);
+      if (ids.includes('p')) res.push({ id: 'p', householdId: HH });
+      return Promise.resolve(res);
+    });
     await new EntriesService(prisma).upsertBatch(HH, [{ id: 'e1', kind: 'spending', categoryId: 'spd-n05', amountPaise: 2500,
       entryDate: '2026-01-20T00:00:00.000Z', note: 'n', parentId: 'p', version: 2 } as any], 'u1');
     const data = prisma.entry.update.mock.calls[0][0].data;
@@ -229,7 +248,7 @@ describe('DEF-FIN-04 / DEF-SYNC-02/03 — entries upsert guards', () => {
 
   it('a soft-deleted entry is not revived by an equal-version offline edit', async () => {
     const prisma: any = base();
-    prisma.entry.findUnique.mockResolvedValue({ ...existing, deletedAt: new Date() });
+    prisma.entry.findMany.mockResolvedValue([{ ...existing, deletedAt: new Date() }]);
     await new EntriesService(prisma).upsertBatch(HH, [{ id: 'e1', kind: 'spending', categoryId: 'spd-n05', amountPaise: 9999,
       entryDate: '2026-01-15T00:00:00.000Z', version: 2 } as any], 'u1');
     expect(prisma.entry.update).not.toHaveBeenCalled();
@@ -250,12 +269,27 @@ describe('DEF-SYNC-01 — hard deletions are propagated with tombstones', () => 
     const prisma: any = {
       syncTombstone: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn() },
       plannedBill: { findUnique: jest.fn(), deleteMany: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
-      receivable: { findUnique: jest.fn(), deleteMany: jest.fn() },
-      category: { findUnique: jest.fn(), updateMany: jest.fn(), upsert: jest.fn() },
-      annual_targets: { findUnique: jest.fn(), deleteMany: jest.fn() },
-      entry: { findUnique: jest.fn() },
+      receivable: { findUnique: jest.fn(), deleteMany: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      category: { findUnique: jest.fn(), updateMany: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      annual_targets: { findUnique: jest.fn(), deleteMany: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      account: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      creditCard: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      cardTransaction: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      savingGoal: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      sinkingFund: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      goalContribution: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      fundMovement: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      budget: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      reserveLine: { findUnique: jest.fn(), upsert: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      entry: { findUnique: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      monthSnapshot: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
     };
-    const entries: any = { upsertBatch: jest.fn().mockResolvedValue({ synced: 0, failed: 0 }) };
+    const entries: any = {
+      validateBatch: jest.fn().mockResolvedValue({ validWrites: [], neededCategories: new Map(), syncedCount: 0, failedCount: 0, rejected: [] }),
+      applyBatch: jest.fn().mockResolvedValue(undefined),
+      upsertBatch: jest.fn().mockResolvedValue({ synced: 0, failed: 0, rejected: [] }),
+    };
     return { prisma, svc: new SyncService(entries, prisma) };
   };
 

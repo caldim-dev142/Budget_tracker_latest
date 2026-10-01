@@ -29,6 +29,7 @@ model Household {
   annualTargets    annual_targets[]
   householdInvites HouseholdInvite[]
   syncTombstones   SyncTombstone[]
+  recurringRules   RecurringRule[]
 
   @@map("households")
 }
@@ -352,4 +353,32 @@ model SyncTombstone {
   @@unique([entity, entityId])
   @@index([householdId])
   @@map("sync_tombstones")
+}
+
+/// Recurring rule — a template for auto or remind-mode monthly entries.
+/// processedDates is stored as a JSON array of ISO date strings (max 60 items).
+/// No balance logic reads this table; it only generates normal entries.
+model RecurringRule {
+  id               String    @id @default(uuid())
+  householdId      String    @map("household_id")
+  kind             String                           // 'spending' | 'income'
+  categoryId       String    @map("category_id")
+  accountId        String?   @map("account_id")
+  cardId           String?   @map("card_id")
+  amountPaise      BigInt    @map("amount_paise")
+  note             String?
+  dayOfMonth       Int       @map("day_of_month")  // 1–31
+  startDate        DateTime  @map("start_date")    @db.Timestamptz(6)
+  endDate          DateTime? @map("end_date")      @db.Timestamptz(6)
+  mode             String    @default("remind")    // 'auto' | 'remind'
+  isActive         Boolean   @default(true)        @map("is_active")
+  processedThrough DateTime? @map("processed_through") @db.Timestamptz(6)
+  processedDates   String    @default("[]")        @map("processed_dates") // JSON array of ISO date strings
+  updatedAt        DateTime  @map("updated_at") @db.Timestamptz(6)  // client-controlled for LWW
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt        DateTime? @map("deleted_at")   @db.Timestamptz(6)
+  household        Household @relation(fields: [householdId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([householdId])
+  @@map("recurring_rules")
 }

@@ -7075,6 +7075,857 @@ class UsersTableCompanion extends UpdateCompanion<UsersTableData> {
   }
 }
 
+class $RecurringRulesTableTable extends RecurringRulesTable
+    with TableInfo<$RecurringRulesTableTable, RecurringRulesTableData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $RecurringRulesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _householdIdMeta =
+      const VerificationMeta('householdId');
+  @override
+  late final GeneratedColumn<String> householdId = GeneratedColumn<String>(
+      'household_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+      'kind', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _categoryIdMeta =
+      const VerificationMeta('categoryId');
+  @override
+  late final GeneratedColumn<String> categoryId = GeneratedColumn<String>(
+      'category_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _accountIdMeta =
+      const VerificationMeta('accountId');
+  @override
+  late final GeneratedColumn<String> accountId = GeneratedColumn<String>(
+      'account_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _cardIdMeta = const VerificationMeta('cardId');
+  @override
+  late final GeneratedColumn<String> cardId = GeneratedColumn<String>(
+      'card_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _amountPaiseMeta =
+      const VerificationMeta('amountPaise');
+  @override
+  late final GeneratedColumn<int> amountPaise = GeneratedColumn<int>(
+      'amount_paise', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _noteMeta = const VerificationMeta('note');
+  @override
+  late final GeneratedColumn<String> note = GeneratedColumn<String>(
+      'note', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _dayOfMonthMeta =
+      const VerificationMeta('dayOfMonth');
+  @override
+  late final GeneratedColumn<int> dayOfMonth = GeneratedColumn<int>(
+      'day_of_month', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _startDateMeta =
+      const VerificationMeta('startDate');
+  @override
+  late final GeneratedColumn<DateTime> startDate = GeneratedColumn<DateTime>(
+      'start_date', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _endDateMeta =
+      const VerificationMeta('endDate');
+  @override
+  late final GeneratedColumn<DateTime> endDate = GeneratedColumn<DateTime>(
+      'end_date', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _modeMeta = const VerificationMeta('mode');
+  @override
+  late final GeneratedColumn<String> mode = GeneratedColumn<String>(
+      'mode', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('remind'));
+  static const VerificationMeta _isActiveMeta =
+      const VerificationMeta('isActive');
+  @override
+  late final GeneratedColumn<bool> isActive = GeneratedColumn<bool>(
+      'is_active', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_active" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _processedThroughMeta =
+      const VerificationMeta('processedThrough');
+  @override
+  late final GeneratedColumn<DateTime> processedThrough =
+      GeneratedColumn<DateTime>('processed_through', aliasedName, true,
+          type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _processedDatesMeta =
+      const VerificationMeta('processedDates');
+  @override
+  late final GeneratedColumn<String> processedDates = GeneratedColumn<String>(
+      'processed_dates', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('[]'));
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+      'updated_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _deletedAtMeta =
+      const VerificationMeta('deletedAt');
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+      'deleted_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        householdId,
+        kind,
+        categoryId,
+        accountId,
+        cardId,
+        amountPaise,
+        note,
+        dayOfMonth,
+        startDate,
+        endDate,
+        mode,
+        isActive,
+        processedThrough,
+        processedDates,
+        createdAt,
+        updatedAt,
+        deletedAt
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'recurring_rules';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<RecurringRulesTableData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('household_id')) {
+      context.handle(
+          _householdIdMeta,
+          householdId.isAcceptableOrUnknown(
+              data['household_id']!, _householdIdMeta));
+    } else if (isInserting) {
+      context.missing(_householdIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+          _kindMeta, kind.isAcceptableOrUnknown(data['kind']!, _kindMeta));
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('category_id')) {
+      context.handle(
+          _categoryIdMeta,
+          categoryId.isAcceptableOrUnknown(
+              data['category_id']!, _categoryIdMeta));
+    } else if (isInserting) {
+      context.missing(_categoryIdMeta);
+    }
+    if (data.containsKey('account_id')) {
+      context.handle(_accountIdMeta,
+          accountId.isAcceptableOrUnknown(data['account_id']!, _accountIdMeta));
+    }
+    if (data.containsKey('card_id')) {
+      context.handle(_cardIdMeta,
+          cardId.isAcceptableOrUnknown(data['card_id']!, _cardIdMeta));
+    }
+    if (data.containsKey('amount_paise')) {
+      context.handle(
+          _amountPaiseMeta,
+          amountPaise.isAcceptableOrUnknown(
+              data['amount_paise']!, _amountPaiseMeta));
+    } else if (isInserting) {
+      context.missing(_amountPaiseMeta);
+    }
+    if (data.containsKey('note')) {
+      context.handle(
+          _noteMeta, note.isAcceptableOrUnknown(data['note']!, _noteMeta));
+    }
+    if (data.containsKey('day_of_month')) {
+      context.handle(
+          _dayOfMonthMeta,
+          dayOfMonth.isAcceptableOrUnknown(
+              data['day_of_month']!, _dayOfMonthMeta));
+    } else if (isInserting) {
+      context.missing(_dayOfMonthMeta);
+    }
+    if (data.containsKey('start_date')) {
+      context.handle(_startDateMeta,
+          startDate.isAcceptableOrUnknown(data['start_date']!, _startDateMeta));
+    } else if (isInserting) {
+      context.missing(_startDateMeta);
+    }
+    if (data.containsKey('end_date')) {
+      context.handle(_endDateMeta,
+          endDate.isAcceptableOrUnknown(data['end_date']!, _endDateMeta));
+    }
+    if (data.containsKey('mode')) {
+      context.handle(
+          _modeMeta, mode.isAcceptableOrUnknown(data['mode']!, _modeMeta));
+    }
+    if (data.containsKey('is_active')) {
+      context.handle(_isActiveMeta,
+          isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta));
+    }
+    if (data.containsKey('processed_through')) {
+      context.handle(
+          _processedThroughMeta,
+          processedThrough.isAcceptableOrUnknown(
+              data['processed_through']!, _processedThroughMeta));
+    }
+    if (data.containsKey('processed_dates')) {
+      context.handle(
+          _processedDatesMeta,
+          processedDates.isAcceptableOrUnknown(
+              data['processed_dates']!, _processedDatesMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(_deletedAtMeta,
+          deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  RecurringRulesTableData map(Map<String, dynamic> data,
+      {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RecurringRulesTableData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      householdId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}household_id'])!,
+      kind: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}kind'])!,
+      categoryId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}category_id'])!,
+      accountId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}account_id']),
+      cardId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}card_id']),
+      amountPaise: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}amount_paise'])!,
+      note: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}note']),
+      dayOfMonth: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}day_of_month'])!,
+      startDate: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}start_date'])!,
+      endDate: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}end_date']),
+      mode: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}mode'])!,
+      isActive: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_active'])!,
+      processedThrough: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}processed_through']),
+      processedDates: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}processed_dates'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
+      deletedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}deleted_at']),
+    );
+  }
+
+  @override
+  $RecurringRulesTableTable createAlias(String alias) {
+    return $RecurringRulesTableTable(attachedDatabase, alias);
+  }
+}
+
+class RecurringRulesTableData extends DataClass
+    implements Insertable<RecurringRulesTableData> {
+  final String id;
+  final String householdId;
+  final String kind;
+  final String categoryId;
+  final String? accountId;
+  final String? cardId;
+  final int amountPaise;
+  final String? note;
+  final int dayOfMonth;
+  final DateTime startDate;
+  final DateTime? endDate;
+  final String mode;
+  final bool isActive;
+  final DateTime? processedThrough;
+  final String processedDates;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? deletedAt;
+  const RecurringRulesTableData(
+      {required this.id,
+      required this.householdId,
+      required this.kind,
+      required this.categoryId,
+      this.accountId,
+      this.cardId,
+      required this.amountPaise,
+      this.note,
+      required this.dayOfMonth,
+      required this.startDate,
+      this.endDate,
+      required this.mode,
+      required this.isActive,
+      this.processedThrough,
+      required this.processedDates,
+      required this.createdAt,
+      required this.updatedAt,
+      this.deletedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['household_id'] = Variable<String>(householdId);
+    map['kind'] = Variable<String>(kind);
+    map['category_id'] = Variable<String>(categoryId);
+    if (!nullToAbsent || accountId != null) {
+      map['account_id'] = Variable<String>(accountId);
+    }
+    if (!nullToAbsent || cardId != null) {
+      map['card_id'] = Variable<String>(cardId);
+    }
+    map['amount_paise'] = Variable<int>(amountPaise);
+    if (!nullToAbsent || note != null) {
+      map['note'] = Variable<String>(note);
+    }
+    map['day_of_month'] = Variable<int>(dayOfMonth);
+    map['start_date'] = Variable<DateTime>(startDate);
+    if (!nullToAbsent || endDate != null) {
+      map['end_date'] = Variable<DateTime>(endDate);
+    }
+    map['mode'] = Variable<String>(mode);
+    map['is_active'] = Variable<bool>(isActive);
+    if (!nullToAbsent || processedThrough != null) {
+      map['processed_through'] = Variable<DateTime>(processedThrough);
+    }
+    map['processed_dates'] = Variable<String>(processedDates);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    return map;
+  }
+
+  RecurringRulesTableCompanion toCompanion(bool nullToAbsent) {
+    return RecurringRulesTableCompanion(
+      id: Value(id),
+      householdId: Value(householdId),
+      kind: Value(kind),
+      categoryId: Value(categoryId),
+      accountId: accountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(accountId),
+      cardId:
+          cardId == null && nullToAbsent ? const Value.absent() : Value(cardId),
+      amountPaise: Value(amountPaise),
+      note: note == null && nullToAbsent ? const Value.absent() : Value(note),
+      dayOfMonth: Value(dayOfMonth),
+      startDate: Value(startDate),
+      endDate: endDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(endDate),
+      mode: Value(mode),
+      isActive: Value(isActive),
+      processedThrough: processedThrough == null && nullToAbsent
+          ? const Value.absent()
+          : Value(processedThrough),
+      processedDates: Value(processedDates),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+    );
+  }
+
+  factory RecurringRulesTableData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RecurringRulesTableData(
+      id: serializer.fromJson<String>(json['id']),
+      householdId: serializer.fromJson<String>(json['householdId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      categoryId: serializer.fromJson<String>(json['categoryId']),
+      accountId: serializer.fromJson<String?>(json['accountId']),
+      cardId: serializer.fromJson<String?>(json['cardId']),
+      amountPaise: serializer.fromJson<int>(json['amountPaise']),
+      note: serializer.fromJson<String?>(json['note']),
+      dayOfMonth: serializer.fromJson<int>(json['dayOfMonth']),
+      startDate: serializer.fromJson<DateTime>(json['startDate']),
+      endDate: serializer.fromJson<DateTime?>(json['endDate']),
+      mode: serializer.fromJson<String>(json['mode']),
+      isActive: serializer.fromJson<bool>(json['isActive']),
+      processedThrough:
+          serializer.fromJson<DateTime?>(json['processedThrough']),
+      processedDates: serializer.fromJson<String>(json['processedDates']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'householdId': serializer.toJson<String>(householdId),
+      'kind': serializer.toJson<String>(kind),
+      'categoryId': serializer.toJson<String>(categoryId),
+      'accountId': serializer.toJson<String?>(accountId),
+      'cardId': serializer.toJson<String?>(cardId),
+      'amountPaise': serializer.toJson<int>(amountPaise),
+      'note': serializer.toJson<String?>(note),
+      'dayOfMonth': serializer.toJson<int>(dayOfMonth),
+      'startDate': serializer.toJson<DateTime>(startDate),
+      'endDate': serializer.toJson<DateTime?>(endDate),
+      'mode': serializer.toJson<String>(mode),
+      'isActive': serializer.toJson<bool>(isActive),
+      'processedThrough': serializer.toJson<DateTime?>(processedThrough),
+      'processedDates': serializer.toJson<String>(processedDates),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+    };
+  }
+
+  RecurringRulesTableData copyWith(
+          {String? id,
+          String? householdId,
+          String? kind,
+          String? categoryId,
+          Value<String?> accountId = const Value.absent(),
+          Value<String?> cardId = const Value.absent(),
+          int? amountPaise,
+          Value<String?> note = const Value.absent(),
+          int? dayOfMonth,
+          DateTime? startDate,
+          Value<DateTime?> endDate = const Value.absent(),
+          String? mode,
+          bool? isActive,
+          Value<DateTime?> processedThrough = const Value.absent(),
+          String? processedDates,
+          DateTime? createdAt,
+          DateTime? updatedAt,
+          Value<DateTime?> deletedAt = const Value.absent()}) =>
+      RecurringRulesTableData(
+        id: id ?? this.id,
+        householdId: householdId ?? this.householdId,
+        kind: kind ?? this.kind,
+        categoryId: categoryId ?? this.categoryId,
+        accountId: accountId.present ? accountId.value : this.accountId,
+        cardId: cardId.present ? cardId.value : this.cardId,
+        amountPaise: amountPaise ?? this.amountPaise,
+        note: note.present ? note.value : this.note,
+        dayOfMonth: dayOfMonth ?? this.dayOfMonth,
+        startDate: startDate ?? this.startDate,
+        endDate: endDate.present ? endDate.value : this.endDate,
+        mode: mode ?? this.mode,
+        isActive: isActive ?? this.isActive,
+        processedThrough: processedThrough.present
+            ? processedThrough.value
+            : this.processedThrough,
+        processedDates: processedDates ?? this.processedDates,
+        createdAt: createdAt ?? this.createdAt,
+        updatedAt: updatedAt ?? this.updatedAt,
+        deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+      );
+  RecurringRulesTableData copyWithCompanion(RecurringRulesTableCompanion data) {
+    return RecurringRulesTableData(
+      id: data.id.present ? data.id.value : this.id,
+      householdId:
+          data.householdId.present ? data.householdId.value : this.householdId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      categoryId:
+          data.categoryId.present ? data.categoryId.value : this.categoryId,
+      accountId: data.accountId.present ? data.accountId.value : this.accountId,
+      cardId: data.cardId.present ? data.cardId.value : this.cardId,
+      amountPaise:
+          data.amountPaise.present ? data.amountPaise.value : this.amountPaise,
+      note: data.note.present ? data.note.value : this.note,
+      dayOfMonth:
+          data.dayOfMonth.present ? data.dayOfMonth.value : this.dayOfMonth,
+      startDate: data.startDate.present ? data.startDate.value : this.startDate,
+      endDate: data.endDate.present ? data.endDate.value : this.endDate,
+      mode: data.mode.present ? data.mode.value : this.mode,
+      isActive: data.isActive.present ? data.isActive.value : this.isActive,
+      processedThrough: data.processedThrough.present
+          ? data.processedThrough.value
+          : this.processedThrough,
+      processedDates: data.processedDates.present
+          ? data.processedDates.value
+          : this.processedDates,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RecurringRulesTableData(')
+          ..write('id: $id, ')
+          ..write('householdId: $householdId, ')
+          ..write('kind: $kind, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('accountId: $accountId, ')
+          ..write('cardId: $cardId, ')
+          ..write('amountPaise: $amountPaise, ')
+          ..write('note: $note, ')
+          ..write('dayOfMonth: $dayOfMonth, ')
+          ..write('startDate: $startDate, ')
+          ..write('endDate: $endDate, ')
+          ..write('mode: $mode, ')
+          ..write('isActive: $isActive, ')
+          ..write('processedThrough: $processedThrough, ')
+          ..write('processedDates: $processedDates, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      id,
+      householdId,
+      kind,
+      categoryId,
+      accountId,
+      cardId,
+      amountPaise,
+      note,
+      dayOfMonth,
+      startDate,
+      endDate,
+      mode,
+      isActive,
+      processedThrough,
+      processedDates,
+      createdAt,
+      updatedAt,
+      deletedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RecurringRulesTableData &&
+          other.id == this.id &&
+          other.householdId == this.householdId &&
+          other.kind == this.kind &&
+          other.categoryId == this.categoryId &&
+          other.accountId == this.accountId &&
+          other.cardId == this.cardId &&
+          other.amountPaise == this.amountPaise &&
+          other.note == this.note &&
+          other.dayOfMonth == this.dayOfMonth &&
+          other.startDate == this.startDate &&
+          other.endDate == this.endDate &&
+          other.mode == this.mode &&
+          other.isActive == this.isActive &&
+          other.processedThrough == this.processedThrough &&
+          other.processedDates == this.processedDates &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt);
+}
+
+class RecurringRulesTableCompanion
+    extends UpdateCompanion<RecurringRulesTableData> {
+  final Value<String> id;
+  final Value<String> householdId;
+  final Value<String> kind;
+  final Value<String> categoryId;
+  final Value<String?> accountId;
+  final Value<String?> cardId;
+  final Value<int> amountPaise;
+  final Value<String?> note;
+  final Value<int> dayOfMonth;
+  final Value<DateTime> startDate;
+  final Value<DateTime?> endDate;
+  final Value<String> mode;
+  final Value<bool> isActive;
+  final Value<DateTime?> processedThrough;
+  final Value<String> processedDates;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> deletedAt;
+  final Value<int> rowid;
+  const RecurringRulesTableCompanion({
+    this.id = const Value.absent(),
+    this.householdId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.categoryId = const Value.absent(),
+    this.accountId = const Value.absent(),
+    this.cardId = const Value.absent(),
+    this.amountPaise = const Value.absent(),
+    this.note = const Value.absent(),
+    this.dayOfMonth = const Value.absent(),
+    this.startDate = const Value.absent(),
+    this.endDate = const Value.absent(),
+    this.mode = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.processedThrough = const Value.absent(),
+    this.processedDates = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  RecurringRulesTableCompanion.insert({
+    required String id,
+    required String householdId,
+    required String kind,
+    required String categoryId,
+    this.accountId = const Value.absent(),
+    this.cardId = const Value.absent(),
+    required int amountPaise,
+    this.note = const Value.absent(),
+    required int dayOfMonth,
+    required DateTime startDate,
+    this.endDate = const Value.absent(),
+    this.mode = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.processedThrough = const Value.absent(),
+    this.processedDates = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        householdId = Value(householdId),
+        kind = Value(kind),
+        categoryId = Value(categoryId),
+        amountPaise = Value(amountPaise),
+        dayOfMonth = Value(dayOfMonth),
+        startDate = Value(startDate),
+        createdAt = Value(createdAt),
+        updatedAt = Value(updatedAt);
+  static Insertable<RecurringRulesTableData> custom({
+    Expression<String>? id,
+    Expression<String>? householdId,
+    Expression<String>? kind,
+    Expression<String>? categoryId,
+    Expression<String>? accountId,
+    Expression<String>? cardId,
+    Expression<int>? amountPaise,
+    Expression<String>? note,
+    Expression<int>? dayOfMonth,
+    Expression<DateTime>? startDate,
+    Expression<DateTime>? endDate,
+    Expression<String>? mode,
+    Expression<bool>? isActive,
+    Expression<DateTime>? processedThrough,
+    Expression<String>? processedDates,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (householdId != null) 'household_id': householdId,
+      if (kind != null) 'kind': kind,
+      if (categoryId != null) 'category_id': categoryId,
+      if (accountId != null) 'account_id': accountId,
+      if (cardId != null) 'card_id': cardId,
+      if (amountPaise != null) 'amount_paise': amountPaise,
+      if (note != null) 'note': note,
+      if (dayOfMonth != null) 'day_of_month': dayOfMonth,
+      if (startDate != null) 'start_date': startDate,
+      if (endDate != null) 'end_date': endDate,
+      if (mode != null) 'mode': mode,
+      if (isActive != null) 'is_active': isActive,
+      if (processedThrough != null) 'processed_through': processedThrough,
+      if (processedDates != null) 'processed_dates': processedDates,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  RecurringRulesTableCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? householdId,
+      Value<String>? kind,
+      Value<String>? categoryId,
+      Value<String?>? accountId,
+      Value<String?>? cardId,
+      Value<int>? amountPaise,
+      Value<String?>? note,
+      Value<int>? dayOfMonth,
+      Value<DateTime>? startDate,
+      Value<DateTime?>? endDate,
+      Value<String>? mode,
+      Value<bool>? isActive,
+      Value<DateTime?>? processedThrough,
+      Value<String>? processedDates,
+      Value<DateTime>? createdAt,
+      Value<DateTime>? updatedAt,
+      Value<DateTime?>? deletedAt,
+      Value<int>? rowid}) {
+    return RecurringRulesTableCompanion(
+      id: id ?? this.id,
+      householdId: householdId ?? this.householdId,
+      kind: kind ?? this.kind,
+      categoryId: categoryId ?? this.categoryId,
+      accountId: accountId ?? this.accountId,
+      cardId: cardId ?? this.cardId,
+      amountPaise: amountPaise ?? this.amountPaise,
+      note: note ?? this.note,
+      dayOfMonth: dayOfMonth ?? this.dayOfMonth,
+      startDate: startDate ?? this.startDate,
+      endDate: endDate ?? this.endDate,
+      mode: mode ?? this.mode,
+      isActive: isActive ?? this.isActive,
+      processedThrough: processedThrough ?? this.processedThrough,
+      processedDates: processedDates ?? this.processedDates,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (householdId.present) {
+      map['household_id'] = Variable<String>(householdId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (categoryId.present) {
+      map['category_id'] = Variable<String>(categoryId.value);
+    }
+    if (accountId.present) {
+      map['account_id'] = Variable<String>(accountId.value);
+    }
+    if (cardId.present) {
+      map['card_id'] = Variable<String>(cardId.value);
+    }
+    if (amountPaise.present) {
+      map['amount_paise'] = Variable<int>(amountPaise.value);
+    }
+    if (note.present) {
+      map['note'] = Variable<String>(note.value);
+    }
+    if (dayOfMonth.present) {
+      map['day_of_month'] = Variable<int>(dayOfMonth.value);
+    }
+    if (startDate.present) {
+      map['start_date'] = Variable<DateTime>(startDate.value);
+    }
+    if (endDate.present) {
+      map['end_date'] = Variable<DateTime>(endDate.value);
+    }
+    if (mode.present) {
+      map['mode'] = Variable<String>(mode.value);
+    }
+    if (isActive.present) {
+      map['is_active'] = Variable<bool>(isActive.value);
+    }
+    if (processedThrough.present) {
+      map['processed_through'] = Variable<DateTime>(processedThrough.value);
+    }
+    if (processedDates.present) {
+      map['processed_dates'] = Variable<String>(processedDates.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RecurringRulesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('householdId: $householdId, ')
+          ..write('kind: $kind, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('accountId: $accountId, ')
+          ..write('cardId: $cardId, ')
+          ..write('amountPaise: $amountPaise, ')
+          ..write('note: $note, ')
+          ..write('dayOfMonth: $dayOfMonth, ')
+          ..write('startDate: $startDate, ')
+          ..write('endDate: $endDate, ')
+          ..write('mode: $mode, ')
+          ..write('isActive: $isActive, ')
+          ..write('processedThrough: $processedThrough, ')
+          ..write('processedDates: $processedDates, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -7107,6 +7958,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AnnualTargetsTableTable annualTargetsTable =
       $AnnualTargetsTableTable(this);
   late final $UsersTableTable usersTable = $UsersTableTable(this);
+  late final $RecurringRulesTableTable recurringRulesTable =
+      $RecurringRulesTableTable(this);
   late final EntryDao entryDao = EntryDao(this as AppDatabase);
   late final CategoryDao categoryDao = CategoryDao(this as AppDatabase);
   late final SnapshotDao snapshotDao = SnapshotDao(this as AppDatabase);
@@ -7116,6 +7969,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final CardDao cardDao = CardDao(this as AppDatabase);
   late final AccountDao accountDao = AccountDao(this as AppDatabase);
   late final BorrowLendDao borrowLendDao = BorrowLendDao(this as AppDatabase);
+  late final RecurringRuleDao recurringRuleDao =
+      RecurringRuleDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -7137,7 +7992,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         monthSnapshotsTable,
         syncQueueTable,
         annualTargetsTable,
-        usersTable
+        usersTable,
+        recurringRulesTable
       ];
 }
 
@@ -11712,6 +12568,383 @@ typedef $$UsersTableTableProcessedTableManager = ProcessedTableManager<
     ),
     UsersTableData,
     PrefetchHooks Function()>;
+typedef $$RecurringRulesTableTableCreateCompanionBuilder
+    = RecurringRulesTableCompanion Function({
+  required String id,
+  required String householdId,
+  required String kind,
+  required String categoryId,
+  Value<String?> accountId,
+  Value<String?> cardId,
+  required int amountPaise,
+  Value<String?> note,
+  required int dayOfMonth,
+  required DateTime startDate,
+  Value<DateTime?> endDate,
+  Value<String> mode,
+  Value<bool> isActive,
+  Value<DateTime?> processedThrough,
+  Value<String> processedDates,
+  required DateTime createdAt,
+  required DateTime updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<int> rowid,
+});
+typedef $$RecurringRulesTableTableUpdateCompanionBuilder
+    = RecurringRulesTableCompanion Function({
+  Value<String> id,
+  Value<String> householdId,
+  Value<String> kind,
+  Value<String> categoryId,
+  Value<String?> accountId,
+  Value<String?> cardId,
+  Value<int> amountPaise,
+  Value<String?> note,
+  Value<int> dayOfMonth,
+  Value<DateTime> startDate,
+  Value<DateTime?> endDate,
+  Value<String> mode,
+  Value<bool> isActive,
+  Value<DateTime?> processedThrough,
+  Value<String> processedDates,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<DateTime?> deletedAt,
+  Value<int> rowid,
+});
+
+class $$RecurringRulesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $RecurringRulesTableTable> {
+  $$RecurringRulesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get householdId => $composableBuilder(
+      column: $table.householdId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get kind => $composableBuilder(
+      column: $table.kind, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get accountId => $composableBuilder(
+      column: $table.accountId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get cardId => $composableBuilder(
+      column: $table.cardId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get amountPaise => $composableBuilder(
+      column: $table.amountPaise, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get note => $composableBuilder(
+      column: $table.note, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get dayOfMonth => $composableBuilder(
+      column: $table.dayOfMonth, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get startDate => $composableBuilder(
+      column: $table.startDate, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get endDate => $composableBuilder(
+      column: $table.endDate, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get mode => $composableBuilder(
+      column: $table.mode, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get processedThrough => $composableBuilder(
+      column: $table.processedThrough,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get processedDates => $composableBuilder(
+      column: $table.processedDates,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$RecurringRulesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $RecurringRulesTableTable> {
+  $$RecurringRulesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get householdId => $composableBuilder(
+      column: $table.householdId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+      column: $table.kind, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get accountId => $composableBuilder(
+      column: $table.accountId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get cardId => $composableBuilder(
+      column: $table.cardId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get amountPaise => $composableBuilder(
+      column: $table.amountPaise, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get note => $composableBuilder(
+      column: $table.note, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get dayOfMonth => $composableBuilder(
+      column: $table.dayOfMonth, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get startDate => $composableBuilder(
+      column: $table.startDate, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get endDate => $composableBuilder(
+      column: $table.endDate, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get mode => $composableBuilder(
+      column: $table.mode, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get processedThrough => $composableBuilder(
+      column: $table.processedThrough,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get processedDates => $composableBuilder(
+      column: $table.processedDates,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$RecurringRulesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $RecurringRulesTableTable> {
+  $$RecurringRulesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get householdId => $composableBuilder(
+      column: $table.householdId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => column);
+
+  GeneratedColumn<String> get accountId =>
+      $composableBuilder(column: $table.accountId, builder: (column) => column);
+
+  GeneratedColumn<String> get cardId =>
+      $composableBuilder(column: $table.cardId, builder: (column) => column);
+
+  GeneratedColumn<int> get amountPaise => $composableBuilder(
+      column: $table.amountPaise, builder: (column) => column);
+
+  GeneratedColumn<String> get note =>
+      $composableBuilder(column: $table.note, builder: (column) => column);
+
+  GeneratedColumn<int> get dayOfMonth => $composableBuilder(
+      column: $table.dayOfMonth, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get startDate =>
+      $composableBuilder(column: $table.startDate, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get endDate =>
+      $composableBuilder(column: $table.endDate, builder: (column) => column);
+
+  GeneratedColumn<String> get mode =>
+      $composableBuilder(column: $table.mode, builder: (column) => column);
+
+  GeneratedColumn<bool> get isActive =>
+      $composableBuilder(column: $table.isActive, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get processedThrough => $composableBuilder(
+      column: $table.processedThrough, builder: (column) => column);
+
+  GeneratedColumn<String> get processedDates => $composableBuilder(
+      column: $table.processedDates, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+}
+
+class $$RecurringRulesTableTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $RecurringRulesTableTable,
+    RecurringRulesTableData,
+    $$RecurringRulesTableTableFilterComposer,
+    $$RecurringRulesTableTableOrderingComposer,
+    $$RecurringRulesTableTableAnnotationComposer,
+    $$RecurringRulesTableTableCreateCompanionBuilder,
+    $$RecurringRulesTableTableUpdateCompanionBuilder,
+    (
+      RecurringRulesTableData,
+      BaseReferences<_$AppDatabase, $RecurringRulesTableTable,
+          RecurringRulesTableData>
+    ),
+    RecurringRulesTableData,
+    PrefetchHooks Function()> {
+  $$RecurringRulesTableTableTableManager(
+      _$AppDatabase db, $RecurringRulesTableTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$RecurringRulesTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$RecurringRulesTableTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$RecurringRulesTableTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> householdId = const Value.absent(),
+            Value<String> kind = const Value.absent(),
+            Value<String> categoryId = const Value.absent(),
+            Value<String?> accountId = const Value.absent(),
+            Value<String?> cardId = const Value.absent(),
+            Value<int> amountPaise = const Value.absent(),
+            Value<String?> note = const Value.absent(),
+            Value<int> dayOfMonth = const Value.absent(),
+            Value<DateTime> startDate = const Value.absent(),
+            Value<DateTime?> endDate = const Value.absent(),
+            Value<String> mode = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<DateTime?> processedThrough = const Value.absent(),
+            Value<String> processedDates = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
+            Value<DateTime?> deletedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              RecurringRulesTableCompanion(
+            id: id,
+            householdId: householdId,
+            kind: kind,
+            categoryId: categoryId,
+            accountId: accountId,
+            cardId: cardId,
+            amountPaise: amountPaise,
+            note: note,
+            dayOfMonth: dayOfMonth,
+            startDate: startDate,
+            endDate: endDate,
+            mode: mode,
+            isActive: isActive,
+            processedThrough: processedThrough,
+            processedDates: processedDates,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            deletedAt: deletedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String householdId,
+            required String kind,
+            required String categoryId,
+            Value<String?> accountId = const Value.absent(),
+            Value<String?> cardId = const Value.absent(),
+            required int amountPaise,
+            Value<String?> note = const Value.absent(),
+            required int dayOfMonth,
+            required DateTime startDate,
+            Value<DateTime?> endDate = const Value.absent(),
+            Value<String> mode = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<DateTime?> processedThrough = const Value.absent(),
+            Value<String> processedDates = const Value.absent(),
+            required DateTime createdAt,
+            required DateTime updatedAt,
+            Value<DateTime?> deletedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              RecurringRulesTableCompanion.insert(
+            id: id,
+            householdId: householdId,
+            kind: kind,
+            categoryId: categoryId,
+            accountId: accountId,
+            cardId: cardId,
+            amountPaise: amountPaise,
+            note: note,
+            dayOfMonth: dayOfMonth,
+            startDate: startDate,
+            endDate: endDate,
+            mode: mode,
+            isActive: isActive,
+            processedThrough: processedThrough,
+            processedDates: processedDates,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            deletedAt: deletedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$RecurringRulesTableTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $RecurringRulesTableTable,
+    RecurringRulesTableData,
+    $$RecurringRulesTableTableFilterComposer,
+    $$RecurringRulesTableTableOrderingComposer,
+    $$RecurringRulesTableTableAnnotationComposer,
+    $$RecurringRulesTableTableCreateCompanionBuilder,
+    $$RecurringRulesTableTableUpdateCompanionBuilder,
+    (
+      RecurringRulesTableData,
+      BaseReferences<_$AppDatabase, $RecurringRulesTableTable,
+          RecurringRulesTableData>
+    ),
+    RecurringRulesTableData,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -11751,4 +12984,6 @@ class $AppDatabaseManager {
       $$AnnualTargetsTableTableTableManager(_db, _db.annualTargetsTable);
   $$UsersTableTableTableManager get usersTable =>
       $$UsersTableTableTableManager(_db, _db.usersTable);
+  $$RecurringRulesTableTableTableManager get recurringRulesTable =>
+      $$RecurringRulesTableTableTableManager(_db, _db.recurringRulesTable);
 }

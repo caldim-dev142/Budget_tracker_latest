@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "812371931220-e5ifkj80c2ke297s095po2blif9sqhb0.apps.googleusercontent.com",
+          "client_id": "812371931220-ra6c7crvpbt25fp9a036qacpojm906vp.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.caldim.budgettracker",
-            "certificate_hash": "26fb652f8818cf4dac7f22a0733b64b330a21ff3"
+            "certificate_hash": "b0f03f5e27f0c1095406f88bece3c3d61687fce6"
           }
         },
         {

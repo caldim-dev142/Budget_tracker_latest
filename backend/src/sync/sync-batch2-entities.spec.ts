@@ -71,68 +71,45 @@ describe('SyncService — Non-Entries Entity Sync Paths (Categories, Cards, Bill
       },
     };
 
+    const createModelMock = (extra?: Record<string, any>) => {
+      const findUnique = jest.fn().mockResolvedValue(null);
+      const findFirst = jest.fn().mockResolvedValue(null);
+      const findMany = jest.fn().mockImplementation(async (args?: any) => {
+        const inIds = args?.where?.id?.in;
+        if (Array.isArray(inIds)) {
+          const rows: any[] = [];
+          for (const id of inIds) {
+            const row = await findUnique({ where: { id } });
+            if (row) rows.push(row);
+          }
+          return rows;
+        }
+        const first = await findFirst(args);
+        if (first) return [first];
+        return [];
+      });
+      return { findUnique, findFirst, findMany, ...extra };
+    };
+
     prismaMock = {
-      category: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      account: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findFirst: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      creditCard: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      cardTransaction: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      plannedBill: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      receivable: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      savingGoal: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      goalContribution: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      sinkingFund: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      fundMovement: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      budget: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findFirst: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      reserveLine: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-      annual_targets: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
+      category: createModelMock(),
+      account: createModelMock(),
+      creditCard: createModelMock(),
+      cardTransaction: createModelMock(),
+      plannedBill: createModelMock(),
+      receivable: createModelMock(),
+      savingGoal: createModelMock(),
+      goalContribution: createModelMock(),
+      sinkingFund: createModelMock(),
+      fundMovement: createModelMock(),
+      budget: createModelMock(),
+      reserveLine: createModelMock(),
+      annual_targets: createModelMock(),
       syncTombstone: {
         findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue({}),
       },
-      entry: {
-        findUnique: jest.fn().mockResolvedValue(null),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
+      entry: createModelMock(),
       monthSnapshot: {
         findMany: jest.fn().mockResolvedValue([]),
       },
@@ -186,6 +163,7 @@ describe('SyncService — Non-Entries Entity Sync Paths (Categories, Cards, Bill
           isDeduction: false,
           isSystem: false,
           sortOrder: 5,
+          archivedAt: null,
         },
         update: {
           kind: 'income',
@@ -195,6 +173,7 @@ describe('SyncService — Non-Entries Entity Sync Paths (Categories, Cards, Bill
           isDeduction: false,
           isSystem: false,
           sortOrder: 5,
+          archivedAt: null,
         },
       });
     });
@@ -814,11 +793,18 @@ describe('SyncService — Non-Entries Entity Sync Paths (Categories, Cards, Bill
     it('upserts budget when new, and updates existing budget when matching cell exists', async () => {
       // Cell 1: brand new
       // Cell 2: already exists in same household/category/yearMonth under a different id
-      prismaMock.budget.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({
-        id: 'budget-cell-existing',
-        householdId,
-        categoryId: 'cat-2',
-        yearMonth: '2026-09',
+      prismaMock.budget.findMany.mockImplementation(async ({ where }: any) => {
+        if (where?.OR) {
+          return [
+            {
+              id: 'budget-cell-existing',
+              householdId,
+              categoryId: 'cat-2',
+              yearMonth: '2026-09',
+            },
+          ];
+        }
+        return [];
       });
 
       const dto = {

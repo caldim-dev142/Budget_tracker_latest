@@ -308,3 +308,31 @@ class UsersTable extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+
+// --- Recurring Rules (monthly recurring entry templates) ---
+class RecurringRulesTable extends Table {
+  @override
+  String get tableName => 'recurring_rules';
+
+  TextColumn get id => text()();
+  TextColumn get householdId => text()();
+  TextColumn get kind => text()(); // 'spending' | 'income'
+  TextColumn get categoryId => text()();
+  TextColumn get accountId => text().nullable()();
+  TextColumn get cardId => text().nullable()();
+  IntColumn get amountPaise => integer()(); // positive paise
+  TextColumn get note => text().nullable()();
+  IntColumn get dayOfMonth => integer()(); // 1-31
+  DateTimeColumn get startDate => dateTime()();
+  DateTimeColumn get endDate => dateTime().nullable()();
+  TextColumn get mode => text().withDefault(const Constant('remind'))(); // 'auto' | 'remind'
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get processedThrough => dateTime().nullable()();
+  TextColumn get processedDates => text().withDefault(const Constant('[]'))(); // JSON array of ISO date strings (unbounded)
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

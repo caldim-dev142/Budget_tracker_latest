@@ -8,6 +8,10 @@ import {
   IsDateString,
   IsInt,
   IsIn,
+  IsPositive,
+  Min,
+  Max,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateEntryDto } from '../../entries/dto/create-entry.dto';
@@ -272,8 +276,73 @@ export const SYNC_DELETABLE_ENTITIES = [
   'fund_movement',
   'annual_target',
   'category',
+  'recurring_rule',
 ] as const;
 export type SyncDeletableEntity = (typeof SYNC_DELETABLE_ENTITIES)[number];
+
+export class SyncRecurringRuleDto {
+  @IsString()
+  id: string;
+
+  @IsIn(['spending', 'income'])
+  kind: string;
+
+  @IsString()
+  categoryId: string;
+
+  @IsOptional()
+  @IsString()
+  accountId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  cardId?: string | null;
+
+  @IsInt()
+  @IsPositive()
+  amountPaise: number;
+
+  @IsOptional()
+  @IsString()
+  note?: string | null;
+
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  dayOfMonth: number;
+
+  @IsDateString()
+  startDate: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string | null;
+
+  @IsIn(['auto', 'remind'])
+  mode: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  processedThrough?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsDateString({}, { each: true })
+  @ArrayMaxSize(400) // No truncation: warn at >400, keep all to avoid data loss
+  processedDates?: string[];
+
+  @IsOptional()
+  @IsDateString()
+  updatedAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  deletedAt?: string | null;
+}
 
 /** A record deleted on the device. Applied server-side and recorded as a tombstone. */
 export class SyncDeletionDto {
@@ -379,6 +448,12 @@ export class SyncBatchDto {
   @ValidateNested({ each: true })
   @Type(() => SyncDeletionDto)
   deletions?: SyncDeletionDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SyncRecurringRuleDto)
+  recurringRules?: SyncRecurringRuleDto[];
 }
 
 export class SyncAnnualTargetDto {
