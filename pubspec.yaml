@@ -1,7 +1,7 @@
 name: budget_tracker
 description: A personal/family budget tracker — Flutter app with NestJS backend.
 publish_to: 'none'
-version: 1.0.2+3
+version: 1.0.4+5
  
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -43,8 +43,6 @@ dependencies:
  
   # Auth / secure storage
   firebase_core: ^3.1.0
-  firebase_auth: ^5.1.0
-  google_sign_in: ^6.2.1
   crypto: ^3.0.3
   flutter_secure_storage: ^9.2.2
   local_auth: ^2.2.0

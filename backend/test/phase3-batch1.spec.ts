@@ -1,18 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 
-jest.mock('firebase-admin/app', () => ({
-  initializeApp: jest.fn(),
-  cert: jest.fn(),
-  getApps: jest.fn(() => [{ name: 'DEFAULT' }]),
-}));
-
-jest.mock('firebase-admin/auth', () => ({
-  getAuth: jest.fn(() => ({
-    verifyIdToken: jest.fn(),
-  })),
-}));
-
 import { AuthService } from '../src/auth/auth.service';
 
 describe('Phase 3 Batch 1 — D2, D5, D7, D8 Verification', () => {
@@ -22,7 +10,7 @@ describe('Phase 3 Batch 1 — D2, D5, D7, D8 Verification', () => {
     let mockTx: any;
     let mockJwt: any;
     let mockConfig: any;
-    let mockFirebase: any;
+    let mockEmailService: any;
 
     beforeEach(() => {
       mockTx = {
@@ -69,15 +57,16 @@ describe('Phase 3 Batch 1 — D2, D5, D7, D8 Verification', () => {
         }),
       };
 
-      mockFirebase = {
-        verifyIdToken: jest.fn(),
+      mockEmailService = {
+        sendOtpEmail: jest.fn().mockResolvedValue(undefined),
+        verifySmtpConnection: jest.fn().mockResolvedValue({ success: true, message: 'OK' }),
       };
 
       authService = new AuthService(
         mockPrisma,
         mockJwt,
         mockConfig,
-        mockFirebase,
+        mockEmailService,
       );
     });
 

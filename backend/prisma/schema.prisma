@@ -353,3 +353,23 @@ model SyncTombstone {
   @@index([householdId])
   @@map("sync_tombstones")
 }
+
+/// Stores secure hashes of 6-digit email OTPs for passwordless authentication.
+/// OTPs are valid for 5 minutes, single-use, rate-limited, and max 5 attempts.
+model EmailOtp {
+  id            String    @id @default(uuid())
+  email         String
+  otpHash       String    @map("otp_hash")
+  displayName   String?   @map("display_name")
+  householdName String?   @map("household_name")
+  attempts      Int       @default(0)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt        DateTime? @map("used_at")    @db.Timestamptz(6)
+  createdAt     DateTime  @default(now())    @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now())    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([email])
+  @@index([email, createdAt])
+  @@map("email_otps")
+}
+

@@ -1,12 +1,3 @@
-jest.mock('firebase-admin/app', () => ({
-  initializeApp: jest.fn(),
-  cert: jest.fn(),
-  getApps: jest.fn(() => [{}]),
-}));
-jest.mock('firebase-admin/auth', () => ({
-  getAuth: jest.fn(() => ({ verifyIdToken: jest.fn() })),
-}));
-
 import { HttpStatus } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -23,7 +14,8 @@ describe('AuthController — Health & DB Readiness Check (B5)', () => {
       login: jest.fn(),
       refresh: jest.fn(),
       logout: jest.fn(),
-      googleSignIn: jest.fn(),
+      requestOtp: jest.fn(),
+      verifyOtp: jest.fn(),
     };
 
     mockPrisma = {
@@ -85,6 +77,34 @@ describe('AuthController — Health & DB Readiness Check (B5)', () => {
         db: 'unreachable',
         timestamp: expect.any(String),
       });
+    });
+  });
+
+  describe('OTP endpoints', () => {
+    it('delegates requestOtp to AuthService', async () => {
+      const dto = { email: 'user@example.com' };
+      (mockAuthService.requestOtp as jest.Mock).mockResolvedValueOnce({
+        success: true,
+        message: 'Verification code sent to your email.',
+      });
+
+      const res = await controller.requestOtp(dto);
+      expect(mockAuthService.requestOtp).toHaveBeenCalledWith(dto);
+      expect(res.success).toBe(true);
+    });
+
+    it('delegates verifyOtp to AuthService', async () => {
+      const dto = { email: 'user@example.com', otp: '123456' };
+      (mockAuthService.verifyOtp as jest.Mock).mockResolvedValueOnce({
+        accessToken: 'jwt-access',
+        refreshToken: 'jwt-refresh',
+        refreshTokenFamily: 'family-1',
+        user: { id: 'u-1', email: 'user@example.com', displayName: 'User', householdId: 'h-1' },
+      });
+
+      const res = await controller.verifyOtp(dto);
+      expect(mockAuthService.verifyOtp).toHaveBeenCalledWith(dto);
+      expect(res.accessToken).toBe('jwt-access');
     });
   });
 });

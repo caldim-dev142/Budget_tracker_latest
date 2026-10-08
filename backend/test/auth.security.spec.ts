@@ -1,79 +1,34 @@
-import { UnauthorizedException } from '@nestjs/common';
-
-jest.mock('firebase-admin/app', () => ({
-  initializeApp: jest.fn(),
-  cert: jest.fn(),
-  getApps: jest.fn(() => [{ name: 'DEFAULT' }]),
-}));
-
-jest.mock('firebase-admin/auth', () => ({
-  getAuth: jest.fn(() => ({
-    verifyIdToken: jest.fn(),
-  })),
-}));
-
+import {
+  UnauthorizedException,
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { createHash } from 'crypto';
 import { AuthService } from '../src/auth/auth.service';
-import { FirebaseAdminService } from '../src/auth/firebase-admin.service';
+import { EmailService } from '../src/email/email.service';
 
-interface DecodedIdToken {
-  aud: string;
-  auth_time: number;
-  email?: string;
-  email_verified?: boolean;
-  exp: number;
-  firebase: {
-    identities: { [key: string]: any };
-    sign_in_provider: string;
-    sign_in_second_factor?: string;
-    second_factor_identifier?: string;
-    tenant?: string;
-    [key: string]: any;
-  };
-  iat: number;
-  iss: string;
-  name?: string;
-  picture?: string;
-  sub: string;
-  uid: string;
-  [key: string]: any;
-}
-
-describe('Firebase Authentication Security Verification', () => {
+describe('Passwordless Email OTP Authentication Security Verification', () => {
   let authService: AuthService;
-  let mockFirebaseAdmin: jest.Mocked<FirebaseAdminService>;
+  let mockEmailService: jest.Mocked<EmailService>;
   let mockPrisma: any;
   let mockJwtService: any;
   let mockConfigService: any;
-  let loggedMessages: string[] = [];
-
-  const validDecodedToken: DecodedIdToken = {
-    uid: 'firebase-uid-12345',
-    email: 'test.user@example.com',
-    name: 'Test Verified User',
-    aud: 'budget-tracker-d034f',
-    iss: 'https://securetoken.google.com/budget-tracker-d034f',
-    sub: 'firebase-uid-12345',
-    auth_time: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    firebase: { identities: {}, sign_in_provider: 'google.com' },
-    iat: Math.floor(Date.now() / 1000),
-  };
 
   beforeEach(() => {
-    loggedMessages = [];
-
     mockConfigService = {
       get: jest.fn((key: string, defaultValue?: string) => {
-        if (key === 'FIREBASE_PROJECT_ID') return 'budget-tracker-d034f';
         if (key === 'JWT_ACCESS_SECRET') return 'super_secret_access_jwt_key_32_chars';
         if (key === 'JWT_REFRESH_SECRET') return 'super_secret_refresh_jwt_key_32_chars';
         return defaultValue;
       }),
     };
 
-    mockFirebaseAdmin = {
-      verifyIdToken: jest.fn(),
-      onModuleInit: jest.fn(),
+    mockEmailService = {
+      sendOtpEmail: jest.fn().mockResolvedValue(undefined),
+      verifySmtpConnection: jest.fn().mockResolvedValue({ success: true, message: 'OK' }),
     } as any;
 
     mockJwtService = {
@@ -88,158 +43,258 @@ describe('Firebase Authentication Security Verification', () => {
       },
       household: {
         create: jest.fn(),
+        upsert: jest.fn(),
       },
-      householdMember: {
+      category: {
+        createMany: jest.fn().mockResolvedValue({ count: 10 }),
+      },
+      emailOtp: {
+        findFirst: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
       },
       refreshToken: {
         create: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+        deleteMany: jest.fn(),
       },
-      $transaction: jest.fn((actions) => Promise.all(actions)),
+      $transaction: jest.fn(async (cb) => cb(mockPrisma)),
     };
 
     authService = new AuthService(
       mockPrisma as any,
       mockJwtService as any,
       mockConfigService as any,
-      mockFirebaseAdmin as any,
+      mockEmailService as any,
     );
   });
 
-  it('1. Valid Firebase ID token -> 200 + application JWT', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockResolvedValue(validDecodedToken as any);
+  describe('1. Request OTP (requestOtp)', () => {
+    it('1.1. Existing user -> generates OTP, stores SHA-256 hash with 5m expiry, sends email', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-001',
+        email: 'test.user@example.com',
+        displayName: 'Test User',
+        household_id: 'hsh-001',
+      });
 
-    mockPrisma.user.findFirst.mockResolvedValue({
-      id: 'app-user-001',
-      email: 'test.user@example.com',
-      displayName: 'Test Verified User',
-      firebaseUid: 'firebase-uid-12345',
-      memberships: [{ householdId: 'household-001', userId: 'app-user-001', role: 'owner' }],
+      const res = await authService.requestOtp({ email: 'test.user@example.com' });
+
+      expect(res.success).toBe(true);
+      expect(mockEmailService.sendOtpEmail).toHaveBeenCalledWith('test.user@example.com', expect.stringMatching(/^\d{6}$/));
+      expect(mockPrisma.emailOtp.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            email: 'test.user@example.com',
+            otpHash: expect.any(String),
+            attempts: 0,
+            expiresAt: expect.any(Date),
+          }),
+        }),
+      );
+
+      // Verify plaintext OTP is NEVER stored in database
+      const createdData = mockPrisma.emailOtp.create.mock.calls[0][0].data;
+      expect(createdData.otp).toBeUndefined();
+      expect(createdData.otpHash.length).toBe(64); // SHA-256 hex length
     });
 
-    const result = await authService.googleSignIn('valid-firebase-id-token');
+    it('1.2. Unknown email on sign in (no displayName) -> 404 NotFoundException', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
 
-    expect(result.accessToken).toBe('mock-application-jwt-access-token');
-    expect(result.user.id).toBe('app-user-001');
-    expect(result.user.email).toBe('test.user@example.com');
-  });
+      await expect(
+        authService.requestOtp({ email: 'unknown@example.com' }),
+      ).rejects.toThrow(NotFoundException);
 
-  it('2. Random/forged token -> 401 Unauthorized', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockRejectedValue(
-      new UnauthorizedException('Invalid, expired, or unverified Firebase ID token')
-    );
-
-    await expect(authService.googleSignIn('random-forged-token-abc123')).rejects.toThrow(
-      UnauthorizedException
-    );
-    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
-    expect(mockJwtService.sign).not.toHaveBeenCalled();
-  });
-
-  it('3. Empty/missing token -> 401 Unauthorized', async () => {
-    await expect(authService.googleSignIn('')).rejects.toThrow(UnauthorizedException);
-    await expect(authService.googleSignIn('   ')).rejects.toThrow(UnauthorizedException);
-    expect(mockFirebaseAdmin.verifyIdToken).not.toHaveBeenCalled();
-    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('4. Expired Firebase ID token -> 401 Unauthorized', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockRejectedValue(
-      new UnauthorizedException('Invalid, expired, or unverified Firebase ID token')
-    );
-
-    await expect(authService.googleSignIn('expired-token')).rejects.toThrow(UnauthorizedException);
-    expect(mockJwtService.sign).not.toHaveBeenCalled();
-  });
-
-  it('5. Token issued for another Firebase project -> 401 Unauthorized', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockRejectedValue(
-      new UnauthorizedException('Firebase ID token audience mismatch')
-    );
-
-    await expect(authService.googleSignIn('wrong-project-token')).rejects.toThrow(
-      UnauthorizedException
-    );
-    expect(mockJwtService.sign).not.toHaveBeenCalled();
-  });
-
-  it('6. Request containing valid token + malicious email parameter -> malicious email ignored', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockResolvedValue(validDecodedToken as any);
-
-    mockPrisma.user.findFirst.mockResolvedValue({
-      id: 'app-user-001',
-      email: 'test.user@example.com',
-      displayName: 'Test Verified User',
-      firebaseUid: 'firebase-uid-12345',
-      memberships: [{ householdId: 'household-001', userId: 'app-user-001', role: 'owner' }],
+      expect(mockEmailService.sendOtpEmail).not.toHaveBeenCalled();
+      expect(mockPrisma.emailOtp.create).not.toHaveBeenCalled();
     });
 
-    // authService.googleSignIn accepts ONLY idToken.
-    const result = await authService.googleSignIn('valid-firebase-id-token');
+    it('1.3. Existing email on register (displayName provided) -> 409 ConflictException', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'existing-user',
+        email: 'existing@example.com',
+        displayName: 'Existing User',
+      });
 
-    // Verification used ONLY token's verified email
-    expect(result.user.email).toBe('test.user@example.com');
-  });
+      await expect(
+        authService.requestOtp({ email: 'existing@example.com', displayName: 'New Name' }),
+      ).rejects.toThrow(ConflictException);
 
-  it('7. Request containing valid token + malicious firebaseUid parameter -> malicious UID ignored', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockResolvedValue(validDecodedToken as any);
-
-    mockPrisma.user.findFirst.mockResolvedValue({
-      id: 'app-user-001',
-      email: 'test.user@example.com',
-      displayName: 'Test Verified User',
-      firebaseUid: 'firebase-uid-12345',
-      memberships: [{ householdId: 'household-001', userId: 'app-user-001', role: 'owner' }],
+      expect(mockEmailService.sendOtpEmail).not.toHaveBeenCalled();
     });
 
-    await authService.googleSignIn('valid-firebase-id-token');
+    it('1.4. Resend within 30s -> 429 Rate limited', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'u1', email: 'test@example.com' });
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({ id: 'recent-otp', createdAt: new Date() });
 
-    // Lookup must use the verified token email (case-insensitive since DEF-AUTH-04), never a client-supplied value.
-    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { email: { equals: 'test.user@example.com', mode: 'insensitive' } },
-      }),
-    );
-  });
+      await expect(
+        authService.requestOtp({ email: 'test@example.com' }),
+      ).rejects.toThrow(HttpException);
 
-  it('8. Repeated login with the same Firebase account -> same application user, no duplicate user created', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockResolvedValue(validDecodedToken as any);
-
-    mockPrisma.user.findFirst.mockResolvedValue({
-      id: 'existing-user-uuid',
-      email: 'test.user@example.com',
-      firebaseUid: 'firebase-uid-12345',
-      displayName: 'Test Verified User',
-      memberships: [{ householdId: 'hsh-existing', userId: 'existing-user-uuid', role: 'owner' }],
+      expect(mockEmailService.sendOtpEmail).not.toHaveBeenCalled();
     });
 
-    const result1 = await authService.googleSignIn('valid-firebase-id-token');
-    const result2 = await authService.googleSignIn('valid-firebase-id-token');
+    it('1.5. More than 5 requests in 10m -> 429 Rate limited', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'u1', email: 'test@example.com' });
+      mockPrisma.emailOtp.findFirst.mockResolvedValue(null);
+      mockPrisma.emailOtp.count.mockResolvedValue(5);
 
-    expect(result1.user.id).toBe('existing-user-uuid');
-    expect(result2.user.id).toBe('existing-user-uuid');
-    expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      await expect(
+        authService.requestOtp({ email: 'test@example.com' }),
+      ).rejects.toThrow(HttpException);
+
+      expect(mockEmailService.sendOtpEmail).not.toHaveBeenCalled();
+    });
   });
 
-  it('9. Firebase token verification failure -> absolutely no JWT issuance', async () => {
-    mockFirebaseAdmin.verifyIdToken.mockRejectedValue(
-      new UnauthorizedException('Token failed')
-    );
+  describe('2. Verify OTP (verifyOtp)', () => {
+    const rawOtp = '654321';
+    const rawOtpHash = createHash('sha256').update(rawOtp).digest('hex');
 
-    await expect(authService.googleSignIn('invalid-token')).rejects.toThrow(UnauthorizedException);
-    expect(mockJwtService.sign).not.toHaveBeenCalled();
-  });
+    it('2.1. Valid OTP for existing user -> 200 + tokens + marks OTP as used', async () => {
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({
+        id: 'otp-rec-1',
+        email: 'test@example.com',
+        otpHash: rawOtpHash,
+        attempts: 0,
+        expiresAt: new Date(Date.now() + 3 * 60 * 1000),
+        usedAt: null,
+      });
 
-  it('10. Verify that complete Firebase ID tokens are never written to logs', async () => {
-    const rawSecretToken = 'header.payload.secret-signature-full-token-content-12345';
-    
-    mockFirebaseAdmin.verifyIdToken.mockRejectedValue(
-      new UnauthorizedException('Token failed')
-    );
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-001',
+        email: 'test@example.com',
+        displayName: 'Test User',
+        household_id: 'household-001',
+      });
 
-    await expect(authService.googleSignIn(rawSecretToken)).rejects.toThrow();
+      const result = await authService.verifyOtp({
+        email: 'test@example.com',
+        otp: rawOtp,
+      });
 
-    const loggedStr = loggedMessages.join(' ');
-    expect(loggedStr).not.toContain(rawSecretToken);
+      expect(result.accessToken).toBe('mock-application-jwt-access-token');
+      expect(result.user.id).toBe('user-001');
+      expect(result.user.email).toBe('test@example.com');
+      expect(mockPrisma.emailOtp.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'otp-rec-1' },
+          data: expect.objectContaining({ usedAt: expect.any(Date) }),
+        }),
+      );
+    });
+
+    it('2.2. Valid OTP for new user -> creates user + household + seeds categories + returns tokens', async () => {
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({
+        id: 'otp-rec-new',
+        email: 'newuser@example.com',
+        otpHash: rawOtpHash,
+        displayName: 'Alice Smith',
+        householdName: "Alice's Family",
+        attempts: 0,
+        expiresAt: new Date(Date.now() + 3 * 60 * 1000),
+        usedAt: null,
+      });
+
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.user.create.mockImplementation(({ data }: any) => ({ ...data, id: 'new-user-id' }));
+
+      const result = await authService.verifyOtp({
+        email: 'newuser@example.com',
+        otp: rawOtp,
+      });
+
+      expect(result.accessToken).toBe('mock-application-jwt-access-token');
+      expect(mockPrisma.household.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            name: "Alice's Family",
+          }),
+        }),
+      );
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            email: 'newuser@example.com',
+            displayName: 'Alice Smith',
+            auth_provider: 'email_otp',
+          }),
+        }),
+      );
+      expect(mockPrisma.category.createMany).toHaveBeenCalled();
+    });
+
+    it('2.3. Incorrect OTP -> 401 Unauthorized + increments attempts count', async () => {
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({
+        id: 'otp-rec-1',
+        email: 'test@example.com',
+        otpHash: rawOtpHash,
+        attempts: 0,
+        expiresAt: new Date(Date.now() + 3 * 60 * 1000),
+        usedAt: null,
+      });
+
+      await expect(
+        authService.verifyOtp({ email: 'test@example.com', otp: '000000' }),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockPrisma.emailOtp.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'otp-rec-1' },
+          data: { attempts: { increment: 1 } },
+        }),
+      );
+      expect(mockJwtService.sign).not.toHaveBeenCalled();
+    });
+
+    it('2.4. Expired OTP -> 400 BadRequestException', async () => {
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({
+        id: 'otp-rec-1',
+        email: 'test@example.com',
+        otpHash: rawOtpHash,
+        attempts: 0,
+        expiresAt: new Date(Date.now() - 1000), // Expired
+        usedAt: null,
+      });
+
+      await expect(
+        authService.verifyOtp({ email: 'test@example.com', otp: rawOtp }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('2.5. Already used OTP -> 400 BadRequestException', async () => {
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({
+        id: 'otp-rec-1',
+        email: 'test@example.com',
+        otpHash: rawOtpHash,
+        attempts: 0,
+        expiresAt: new Date(Date.now() + 3 * 60 * 1000),
+        usedAt: new Date(Date.now() - 60000), // Already consumed
+      });
+
+      await expect(
+        authService.verifyOtp({ email: 'test@example.com', otp: rawOtp }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('2.6. Max attempts exceeded (5 attempts) -> 400 BadRequestException lockout', async () => {
+      mockPrisma.emailOtp.findFirst.mockResolvedValue({
+        id: 'otp-rec-1',
+        email: 'test@example.com',
+        otpHash: rawOtpHash,
+        attempts: 5,
+        expiresAt: new Date(Date.now() + 3 * 60 * 1000),
+        usedAt: null,
+      });
+
+      await expect(
+        authService.verifyOtp({ email: 'test@example.com', otp: rawOtp }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

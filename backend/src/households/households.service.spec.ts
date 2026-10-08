@@ -1,15 +1,3 @@
-jest.mock('firebase-admin/app', () => ({
-  initializeApp: jest.fn(),
-  cert: jest.fn(),
-  getApps: jest.fn(() => [{ name: 'DEFAULT' }]),
-}));
-
-jest.mock('firebase-admin/auth', () => ({
-  getAuth: jest.fn(() => ({
-    verifyIdToken: jest.fn(),
-  })),
-}));
-
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { HouseholdsService } from './households.service';

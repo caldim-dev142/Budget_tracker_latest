@@ -1,9 +1,7 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../../data/local/database.dart';
 import '../../../core/security/password_hasher.dart';
@@ -371,79 +369,156 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
     }
   }
 
-  final _googleSignIn = GoogleSignIn(
-    serverClientId: '812371931220-nfm4elvsk9sbsu1e2bh3mu8une6gb96o.apps.googleusercontent.com',
-    scopes: ['email', 'profile'],
-  );
+  Future<void> _ensureUsersTable(AppDatabase db) async {
+    try {
+      await db.customStatement('''
+        CREATE TABLE IF NOT EXISTS "users" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "email" TEXT NOT NULL,
+          "password" TEXT,
+          "display_name" TEXT NOT NULL,
+          "household_id" TEXT NOT NULL,
+          "auth_provider" TEXT NOT NULL DEFAULT 'otp',
+          "created_at" INTEGER NOT NULL
+        );
+      ''');
+    } catch (_) {}
+  }
 
-  /// Authenticate with Google ID token via NestJS backend
-  Future<void> authenticateWithGoogleIdToken({
-    required String idToken,
+  /// Request a 6-digit OTP code sent via email from the NestJS backend
+  Future<bool> requestOtp({
     required String email,
     String? displayName,
+    String? householdName,
   }) async {
     state = const AsyncValue.loading();
     final normEmail = email.trim().toLowerCase();
-    final name = (displayName != null && displayName.isNotEmpty)
-        ? displayName
-        : normEmail.split('@').first;
 
     try {
       final serverUrl = _ref.read(serverUrlProvider);
       if (serverUrl.isEmpty) {
-        throw Exception('Server URL is not configured. Please contact support.');
+        throw Exception('Server URL is not configured. Please check your settings.');
       }
 
-      if (idToken.isEmpty) {
-        throw Exception('Missing Google ID token.');
+      final payload = <String, dynamic>{
+        'email': normEmail,
+      };
+      if (displayName != null && displayName.trim().isNotEmpty) {
+        payload['displayName'] = displayName.trim();
+      }
+      if (householdName != null && householdName.trim().isNotEmpty) {
+        payload['householdName'] = householdName.trim();
       }
 
       final res = await _dio.post(
-        '$serverUrl/auth/google',
-        data: {
-          'idToken': idToken,
-        },
+        '$serverUrl/auth/request-otp',
+        data: payload,
       );
+
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        state = const AsyncValue.data(AuthState(authMode: AuthMode.guest));
+        return true;
+      }
+      return false;
+    } on DioException catch (e, st) {
+      String msg = 'Failed to send OTP. Please try again.';
+      if (e.response != null) {
+        final resData = e.response?.data;
+        if (resData is Map && resData.containsKey('message')) {
+          final m = resData['message'];
+          msg = m is List ? m.join(', ') : m.toString();
+        } else if (e.response?.statusCode == 404) {
+          msg = 'Account not found. Please create an account first.';
+        } else if (e.response?.statusCode == 429) {
+          msg = 'Too many requests. Please wait a moment before trying again.';
+        }
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        msg = 'Unable to connect to server. Please check your internet connection.';
+      }
+      state = AsyncValue.error(msg, st);
+      return false;
+    } catch (e, st) {
+      state = AsyncValue.error(e.toString().replaceAll('Exception: ', ''), st);
+      return false;
+    }
+  }
+
+  /// Verify the 6-digit OTP code with the NestJS backend and authenticate session
+  Future<bool> verifyOtp({
+    required String email,
+    required String otp,
+    String? displayName,
+    String? householdName,
+  }) async {
+    state = const AsyncValue.loading();
+    final normEmail = email.trim().toLowerCase();
+    final cleanOtp = otp.trim();
+
+    try {
+      final serverUrl = _ref.read(serverUrlProvider);
+      if (serverUrl.isEmpty) {
+        throw Exception('Server URL is not configured. Please check your settings.');
+      }
+
+      final payload = <String, dynamic>{
+        'email': normEmail,
+        'otp': cleanOtp,
+      };
+      if (displayName != null && displayName.trim().isNotEmpty) {
+        payload['displayName'] = displayName.trim();
+      }
+      if (householdName != null && householdName.trim().isNotEmpty) {
+        payload['householdName'] = householdName.trim();
+      }
+
+      final res = await _dio.post(
+        '$serverUrl/auth/verify-otp',
+        data: payload,
+      );
+
       final data = res.data;
-      final token = data['accessToken'];
-      final refreshToken = data['refreshToken'];
+      final token = data['accessToken'] as String?;
+      final refreshToken = data['refreshToken'] as String?;
       final user = data['user'];
 
       if (token == null || user == null) {
         throw Exception('Invalid response received from authentication server.');
       }
 
-      final householdId = user['householdId'] ?? 'household';
-      final uId = user['id'] ?? 'user';
-      final uEmail = user['email'] ?? normEmail;
-      final uName = user['displayName'] ?? name;
+      final userId = user['id'] as String;
+      final householdId = user['householdId'] as String;
+      final retEmail = (user['email'] as String?) ?? normEmail;
+      final retName = (user['displayName'] as String?) ??
+          (displayName?.trim().isNotEmpty == true ? displayName!.trim() : retEmail.split('@').first);
 
       await SecureStore.writeAccessToken(token);
       if (refreshToken != null) {
         await SecureStore.writeRefreshToken(refreshToken);
       }
-      final googleFamily = data['refreshTokenFamily'] ?? data['family'];
-      if (googleFamily != null) {
-        await SecureStore.writeRefreshTokenFamily(googleFamily.toString());
+      final otpFamily = data['refreshTokenFamily'] ?? data['family'];
+      if (otpFamily != null) {
+        await SecureStore.writeRefreshTokenFamily(otpFamily.toString());
       }
-
-      await SecureStore.write('auth_email', uEmail);
-      await SecureStore.write('auth_name', uName);
-      await SecureStore.write('auth_user_id', uId);
+      await SecureStore.write('auth_email', retEmail);
+      await SecureStore.write('auth_name', retName);
+      await SecureStore.write('auth_user_id', userId);
       await SecureStore.write('auth_household_id', householdId);
 
       final db = _ref.read(appDatabaseProvider);
       await _ensureUsersTable(db);
-      final existingLocal = await (db.select(db.usersTable)..where((u) => u.id.equals(uId))).get();
-      if (existingLocal.isEmpty) {
+      final existing = await (db.select(db.usersTable)..where((u) => u.id.equals(userId))).get();
+      if (existing.isEmpty) {
         await db.into(db.usersTable).insert(
               UsersTableCompanion.insert(
-                id: uId,
-                email: uEmail,
+                id: userId,
+                email: retEmail,
                 password: const Value.absent(),
-                displayName: uName,
+                displayName: retName,
                 householdId: householdId,
-                authProvider: const Value('google'),
+                authProvider: const Value('otp'),
                 createdAt: DateTime.now(),
               ),
             );
@@ -456,127 +531,43 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       state = AsyncValue.data(AuthState(
         authMode: AuthMode.authenticated,
         isAuthenticated: true,
-        email: uEmail,
-        displayName: uName,
+        email: retEmail,
+        displayName: retName,
         householdId: householdId,
-        userId: uId,
+        userId: userId,
         token: token,
-        authProvider: 'google',
+        authProvider: 'otp',
         hasCompletedOnboarding: false,
       ));
+
       Future.microtask(() async {
         await _ref.read(syncServiceProvider).syncAllQueue();
       });
+      return true;
     } on DioException catch (e, st) {
-      String msg = 'Google authentication failed. Please check your connection.';
+      String msg = 'OTP verification failed.';
       if (e.response != null) {
         final resData = e.response?.data;
         if (resData is Map && resData.containsKey('message')) {
           final m = resData['message'];
           msg = m is List ? m.join(', ') : m.toString();
+        } else if (e.response?.statusCode == 400) {
+          msg = 'Invalid or expired OTP code.';
+        } else if (e.response?.statusCode == 429) {
+          msg = 'Too many attempts. Please request a new OTP.';
         }
       } else if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
           e.type == DioExceptionType.connectionError) {
-        msg = 'Unable to connect to server. Please check your internet connection and try again.';
+        msg = 'Unable to connect to server. Please check your internet connection.';
       }
       state = AsyncValue.error(msg, st);
+      return false;
     } catch (e, st) {
       state = AsyncValue.error(e.toString().replaceAll('Exception: ', ''), st);
-    }
-  }
-
-  /// Triggers official Google OAuth + Firebase Auth sign-in flow across Android, iOS, and Web.
-  /// Authenticates with Firebase via GoogleAuthProvider credential and retrieves the verified Firebase ID token.
-  Future<bool> signInWithGoogleOAuth() async {
-    final previousState = state.valueOrNull ?? const AuthState(authMode: AuthMode.guest);
-    state = const AsyncValue.loading();
-    try {
-      final googleAccount = await _googleSignIn.signIn();
-      if (googleAccount == null) {
-        // User canceled sign-in -> restore previous state cleanly
-        state = AsyncValue.data(previousState);
-        return false;
-      }
-
-      final googleAuth = await googleAccount.authentication;
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      final User? firebaseUser = userCredential.user;
-
-      if (firebaseUser == null) {
-        throw Exception('Firebase user authentication returned null.');
-      }
-
-      final String? firebaseIdToken = await firebaseUser.getIdToken();
-      if (firebaseIdToken == null || firebaseIdToken.isEmpty) {
-        throw Exception('Unable to obtain Firebase ID token.');
-      }
-
-      final verifiedEmail = firebaseUser.email ?? googleAccount.email;
-      final verifiedName = firebaseUser.displayName ??
-          googleAccount.displayName ??
-          verifiedEmail.split('@').first;
-
-      await authenticateWithGoogleIdToken(
-        idToken: firebaseIdToken,
-        email: verifiedEmail,
-        displayName: verifiedName,
-      );
-      return true;
-    } on FirebaseAuthException catch (e) {
-      String message = 'Google sign-in failed.';
-      if (e.code == 'account-exists-with-different-credential') {
-        message = 'An account already exists with a different credential.';
-      } else if (e.code == 'invalid-credential') {
-        message = 'Invalid Google sign-in credentials.';
-      } else if (e.message != null && e.message!.isNotEmpty) {
-        message = e.message!;
-      }
-      state = AsyncValue.error(message, StackTrace.current);
-      return false;
-    } catch (e, st) {
-      debugPrint('Google Sign-In Exception: $e\n$st');
-      final errStr = e.toString();
-      if (errStr.contains('SocketException')) {
-        state = AsyncValue.error('Network error during Google sign-in. Please check your connection.', StackTrace.current);
-      } else {
-        state = AsyncValue.error('Google sign-in failed: $errStr', StackTrace.current);
-      }
       return false;
     }
-
-  }
-
-  Future<void> _ensureUsersTable(AppDatabase db) async {
-    try {
-      await db.customStatement('''
-        CREATE TABLE IF NOT EXISTS "users" (
-          "id" TEXT NOT NULL PRIMARY KEY,
-          "email" TEXT NOT NULL,
-          "password" TEXT,
-          "display_name" TEXT NOT NULL,
-          "household_id" TEXT NOT NULL,
-          "auth_provider" TEXT NOT NULL DEFAULT 'email',
-          "created_at" INTEGER NOT NULL
-        );
-      ''');
-    } catch (_) {}
-  }
-
-  /// Real Google Sign-In Verification & User Account Creation
-  Future<void> googleSignIn({required String email, String? displayName, String? idToken}) async {
-    await authenticateWithGoogleIdToken(
-      idToken: idToken ?? '',
-      email: email,
-      displayName: displayName,
-    );
   }
 
   /// Real Password Authentication & Account Verification
@@ -1149,17 +1140,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
       }
     } catch (_) {}
 
-    await Future.wait([
-      FirebaseAuth.instance.signOut().catchError((_) {}),
-      () async {
-        try {
-          if (await _googleSignIn.isSignedIn()) {
-            await _googleSignIn.signOut();
-          }
-        } catch (_) {}
-      }(),
-    ]);
-
     await SecureStore.clearTokens();
     await SecureStore.delete('auth_email');
     await SecureStore.delete('auth_name');
@@ -1201,22 +1181,6 @@ class AuthStateNotifier extends StateNotifier<AsyncValue<AuthState>> {
         await (db.delete(db.usersTable)..where((u) => u.id.equals(userId))).go();
       } catch (_) {}
     }
-
-    // Sign out from Firebase and Google Auth if signed in
-    try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser != null) {
-        await firebaseUser.delete().catchError((_) {});
-      }
-      await FirebaseAuth.instance.signOut();
-    } catch (_) {}
-
-    try {
-      if (await _googleSignIn.isSignedIn()) {
-        await _googleSignIn.disconnect().catchError((_) => null);
-        await _googleSignIn.signOut();
-      }
-    } catch (_) {}
 
     // Wipe local credentials and session
     await SecureStore.clearTokens();

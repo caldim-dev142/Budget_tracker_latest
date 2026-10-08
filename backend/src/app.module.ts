@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { envValidationSchema } from './config/env.validation';
 
 import { DatabaseModule } from './database/database.module';
+import { EmailModule } from './email/email.module';
 import { AuthModule } from './auth/auth.module';
 import { HouseholdsModule } from './households/households.module';
 import { UsersModule } from './users/users.module';
@@ -39,6 +40,7 @@ import { CleanupModule } from './common/jobs/cleanup.module';
 
     // Feature modules
     DatabaseModule,
+    EmailModule,
     AuthModule,
     HouseholdsModule,
     UsersModule,

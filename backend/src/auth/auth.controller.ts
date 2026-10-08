@@ -7,8 +7,9 @@ import { FastifyReply } from 'fastify';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto, LogoutDto } from './dto/refresh-token.dto';
-import { GoogleSignInDto } from './dto/google-sign-in.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('auth')
@@ -42,27 +43,33 @@ export class AuthController {
     }
   }
 
+  @Post('request-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a 6-digit email OTP for passwordless login or registration' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute per IP
+  requestOtp(@Body() dto: RequestOtpDto) {
+    return this.authService.requestOtp(dto);
+  }
+
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify the 6-digit OTP and receive JWT access/refresh tokens' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 verification attempts per minute per IP
+  verifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyOtp(dto);
+  }
+
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Register new user and household' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5/min for registration
+  @ApiOperation({ summary: 'Register new user and household with email/password (legacy)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
-  @Post('google')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Authenticate via Google ID token' })
-  // Credential endpoint: throttle it like login rather than leaving it on the
-  // 100/min global default, which allows sustained token probing.
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  googleSignIn(@Body() dto: GoogleSignInDto) {
-    return this.authService.googleSignIn(dto.idToken);
-  }
-
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Authenticate and get tokens' })
+  @ApiOperation({ summary: 'Authenticate via password and get tokens (legacy)' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -71,11 +78,8 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate refresh token' })
-  // Credential endpoint: a refresh token is a bearer secret, so this must not
-  // sit on the permissive global default.
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   refresh(@Body() body: RefreshTokenDto) {
-    // The raw token is passed through; AuthService hashes it exactly once before lookup.
     return this.authService.refresh(body.userId, body.refreshToken, body.family);
   }
 

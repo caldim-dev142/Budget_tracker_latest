@@ -4,9 +4,6 @@
  */
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 
-jest.mock('firebase-admin/app', () => ({ initializeApp: jest.fn(), cert: jest.fn(), getApps: jest.fn(() => [{}]) }));
-jest.mock('firebase-admin/auth', () => ({ getAuth: jest.fn(() => ({ verifyIdToken: jest.fn() })) }));
-
 import { JwtStrategy } from '../src/auth/strategies/jwt.strategy';
 import { HouseholdGuard } from '../src/auth/guards/household.guard';
 import { AuthController } from '../src/auth/auth.controller';

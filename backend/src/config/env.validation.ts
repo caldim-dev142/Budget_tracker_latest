@@ -65,15 +65,13 @@ export const envValidationSchema = Joi.object({
   // throttler reads the real client IP from X-Forwarded-For.
   TRUST_PROXY: Joi.string().valid('true', 'false').default('false'),
 
-  // ─── Firebase / Google Sign-In ──────────────────────────────────────────────
-  // Optional so local development without Google Sign-In still boots, but the
-  // auth service fails closed at verification time when they are absent.
-  FIREBASE_PROJECT_ID: Joi.string().optional(),
-  FIREBASE_CLIENT_EMAIL: Joi.string().optional(),
-  FIREBASE_PRIVATE_KEY: Joi.string().optional(),
-
-  // Comma-separated OAuth client IDs accepted by the direct-Google ID token
-  // fallback. When empty, that fallback is disabled entirely (fail closed) —
-  // never verify a Google ID token without pinning its audience.
-  GOOGLE_OAUTH_CLIENT_IDS: Joi.string().optional().allow(''),
+  // ─── SMTP Email Configuration ──────────────────────────────────────────────
+  SMTP_HOST: Joi.string().optional().allow(''),
+  SMTP_PORT: Joi.number().default(587),
+  SMTP_SECURE: Joi.string().valid('true', 'false').default('false'),
+  SMTP_USER: Joi.string().optional().allow(''),
+  SMTP_PASSWORD: Joi.string().optional().allow(''),
+  SMTP_FROM: Joi.string().optional().allow(''),
+  SMTP_FROM_NAME: Joi.string().default('CalBudget'),
 });
+

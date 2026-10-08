@@ -1,14 +1,26 @@
-import { Injectable, Inject, UnauthorizedException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  UnauthorizedException,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, randomInt, createHash, timingSafeEqual } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { FirebaseAdminService } from './firebase-admin.service';
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { EmailService } from '../email/email.service';
 import { seedCategories } from '../categories/categories-seed.data';
 import { buildSystemCategoriesForHousehold } from '../categories/categories-system.data';
 
@@ -18,38 +30,170 @@ export function normalizeEmail(email: string | undefined | null): string {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject('PRISMA') private readonly prisma: PrismaClient,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
-    private readonly firebaseAdmin: FirebaseAdminService,
+    private readonly emailService: EmailService,
   ) {}
 
-  async googleSignIn(idToken: string) {
-    if (!idToken || typeof idToken !== 'string' || idToken.trim().length === 0) {
-      throw new UnauthorizedException('Missing or invalid Firebase ID token.');
-    }
-
-    const decodedToken = await this.firebaseAdmin.verifyIdToken(idToken);
-    const email = normalizeEmail(decodedToken.email);
-
+  /**
+   * Request a 6-digit OTP sent to the user's email.
+   * Rate limited: min 30s between requests, max 5 requests per 10m window.
+   */
+  async requestOtp(dto: RequestOtpDto) {
+    const email = normalizeEmail(dto.email);
     if (!email) {
-      throw new UnauthorizedException('Firebase ID token missing verified email address.');
+      throw new BadRequestException('Valid email address is required.');
     }
 
-    const displayName = decodedToken.name || email.split('@')[0];
+    const existingUser = await this.findUserByEmail(email);
+
+    // If registration is requested (displayName provided) but user already exists
+    if (dto.displayName && existingUser) {
+      throw new ConflictException('Email is already registered. Please sign in instead.');
+    }
+
+    // If sign in is requested (no displayName provided) but user does not exist
+    if (!dto.displayName && !existingUser) {
+      throw new NotFoundException('Account not found. Please create an account first.');
+    }
+
+    // Rate Limiting: Minimum 30s interval between consecutive requests for same email
+    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+    const recentOtp = await (this.prisma as any).emailOtp.findFirst({
+      where: {
+        email,
+        createdAt: { gte: thirtySecondsAgo },
+      },
+    });
+    if (recentOtp) {
+      throw new HttpException(
+        'Please wait 30 seconds before requesting another verification code.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // Rate Limiting: Maximum 5 OTP requests in a 10 minute window
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const recentCount = await (this.prisma as any).emailOtp.count({
+      where: {
+        email,
+        createdAt: { gte: tenMinutesAgo },
+      },
+    });
+    if (recentCount >= 5) {
+      throw new HttpException(
+        'Too many OTP requests. Please wait 10 minutes before requesting again.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // Invalidate previous unconsumed OTPs for this email to enforce single active OTP
+    await (this.prisma as any).emailOtp.updateMany({
+      where: { email, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    // Generate cryptographically secure 6-digit numeric OTP (100000 - 999999)
+    const otp = randomInt(100000, 1000000).toString();
+    const otpHash = createHash('sha256').update(otp).digest('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    await (this.prisma as any).emailOtp.create({
+      data: {
+        id: uuidv4(),
+        email,
+        otpHash,
+        displayName: dto.displayName,
+        householdName: dto.householdName,
+        expiresAt,
+        attempts: 0,
+      },
+    });
+
+    // Send email via real SMTP service (or mock in test/dev if SMTP unconfigured)
+    await this.emailService.sendOtpEmail(email, otp);
+
+    return {
+      success: true,
+      message: 'Verification code sent to your email.',
+    };
+  }
+
+  /**
+   * Verify the 6-digit OTP, authenticate or register the user, and issue access + refresh tokens.
+   */
+  async verifyOtp(dto: VerifyOtpDto) {
+    const email = normalizeEmail(dto.email);
+    const cleanOtp = (dto.otp ?? '').trim();
+
+    if (!email || !cleanOtp) {
+      throw new BadRequestException('Email and verification code are required.');
+    }
+
+    const latestOtp = await (this.prisma as any).emailOtp.findFirst({
+      where: { email },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latestOtp) {
+      throw new BadRequestException('No verification code found. Please request a new code.');
+    }
+
+    if (latestOtp.usedAt !== null) {
+      throw new BadRequestException('Verification code has already been used. Please request a new code.');
+    }
+
+    if (new Date() > latestOtp.expiresAt) {
+      throw new BadRequestException('Verification code has expired. Please request a new code.');
+    }
+
+    if (latestOtp.attempts >= 5) {
+      throw new BadRequestException('Too many incorrect attempts. Please request a new code.');
+    }
+
+    // Increment attempt count on every verification try
+    await (this.prisma as any).emailOtp.update({
+      where: { id: latestOtp.id },
+      data: { attempts: { increment: 1 } },
+    });
+
+    // Verify hash with constant-time equality check to prevent timing attacks
+    const inputHash = createHash('sha256').update(cleanOtp).digest('hex');
+    const inputBuffer = Buffer.from(inputHash, 'utf8');
+    const storedBuffer = Buffer.from(latestOtp.otpHash, 'utf8');
+
+    const isValid = inputBuffer.length === storedBuffer.length && timingSafeEqual(inputBuffer, storedBuffer);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid verification code.');
+    }
+
+    // Mark OTP as used (one-time consumption)
+    await (this.prisma as any).emailOtp.update({
+      where: { id: latestOtp.id },
+      data: { usedAt: new Date() },
+    });
 
     let user = await this.findUserByEmail(email);
 
     if (!user) {
+      // New user registration flow
       const userId = uuidv4();
       const householdId = uuidv4();
+      const displayName = latestOtp.displayName || email.split('@')[0];
+      const householdName =
+        latestOtp.householdName && latestOtp.householdName.trim().length > 0
+          ? latestOtp.householdName.trim()
+          : `${displayName}'s Household`;
 
       user = await this.prisma.$transaction(async (tx) => {
         await tx.household.create({
           data: {
             id: householdId,
-            name: `${displayName}'s Household`,
+            name: householdName,
             ownerId: userId,
           },
         });
@@ -60,7 +204,7 @@ export class AuthService {
             email,
             displayName,
             household_id: householdId,
-            auth_provider: 'google',
+            auth_provider: 'email_otp',
           },
         });
 
@@ -132,7 +276,6 @@ export class AuthService {
         return createdUser;
       });
     } catch (e: any) {
-      // users.email is unique: a concurrent registration for the same address loses the race.
       if (e?.code === 'P2002') throw new ConflictException('Email already registered.');
       throw e;
     }
@@ -189,9 +332,6 @@ export class AuthService {
    * 2. Look it up in the DB - must exist, not used, not expired, and belong to the correct user.
    * 3. Mark it as used (invalidated).
    * 4. Issue a new token pair in the same family.
-   *
-   * If the token is already used (reuse detected), invalidate the entire family to protect
-   * against refresh token theft (RFC 6819 Section 5.2.2.3).
    */
   async refresh(userId: string, rawRefreshToken: string, family: string) {
     if (!rawRefreshToken || !userId || !family) {
@@ -249,12 +389,10 @@ export class AuthService {
    */
   async logout(userId: string, family?: string) {
     if (family) {
-      // Revoke specific session by family
       await (this.prisma as any).refreshToken.deleteMany({
         where: { userId, family },
       });
     } else {
-      // Revoke all sessions for this user (sign out everywhere)
       await (this.prisma as any).refreshToken.deleteMany({
         where: { userId },
       });
@@ -344,11 +482,6 @@ export class AuthService {
     });
   }
 
-  /**
-   * Seed the 4 internal system categories required for borrow/lending and planning settlement.
-   * These are created with isSystem=true and never appear in the user-facing category picker.
-   * Idempotent — safe to call on every login (skipDuplicates).
-   */
   async seedSystemCategoriesForHousehold(householdId: string, tx?: any) {
     const client = tx ?? this.prisma;
     const data = buildSystemCategoriesForHousehold(householdId);
@@ -358,12 +491,9 @@ export class AuthService {
     });
   }
 
-  /**
-   * Parse expiry string like '30d', '15m', '1h' into a Date offset from now.
-   */
   private parseExpiry(expiry: string): Date {
     const match = expiry.match(/^(\d+)([smhd])$/);
-    if (!match) return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // default 30 days
+    if (!match) return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     const value = parseInt(match[1], 10);
     const unit = match[2];
     const multipliers: Record<string, number> = {

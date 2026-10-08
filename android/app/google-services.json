@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "812371931220-ra6c7crvpbt25fp9a036qacpojm906vp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.caldim.budgettracker",
+            "certificate_hash": "b0f03f5e27f0c1095406f88bece3c3d61687fce6"
+          }
+        },
+        {
           "client_id": "812371931220-nfm4elvsk9sbsu1e2bh3mu8une6gb96o.apps.googleusercontent.com",
           "client_type": 3
         }
